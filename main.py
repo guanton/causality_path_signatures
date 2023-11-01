@@ -4,6 +4,7 @@ from itertools import product
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 
+
 def generate_complete_degree_dictionary(p, n):
     """
     This function returns all possible polynomial relations on (x_1, ..., x_n) up to degree p
@@ -15,13 +16,18 @@ def generate_complete_degree_dictionary(p, n):
     in the tuple corresponds to the degree of x_i within the degree k term (ex. [1,0,2] corresponds to x_0*x_2^2 for k=3
     """
     degree_dict = {}
+    order_mapping = {}
+    term_order = 0  # Initialize the order counter
     for k in range(p + 1):
         degree_dict[k] = []
         # use itertools.product to generate all possible combinations of n values, where each value is in [0,k]]
         for combo in product(range(k + 1), repeat=n):
             if sum(combo) == k:
-                degree_dict[k].append(list(combo))
-    return degree_dict
+                term = list(combo)
+                degree_dict[k].append(term)
+                order_mapping[term_order] = tuple(term)
+                term_order += 1  # Increment the order
+    return degree_dict, order_mapping
 
 
 def count_params(degree_dict):
@@ -63,11 +69,12 @@ def generate_causal_parameters(degree_dict, n):
     return causal_params
 
 
-def system_of_odes(X, t, causal_params):
+def system_of_odes(X, t, causal_params, noise_std = 0):
     '''
     :param X: list of n causal variables (for which we will generate time_series data)
     :param t: time indices
     :param causal_params: causal polynomial relationships for each dx_i/dt
+    :param (optional) noise_std: standard deviation of noise (for now added to each time series)
     :return:
     '''
     n = len(X)
@@ -88,7 +95,13 @@ def system_of_odes(X, t, causal_params):
     for i in range(n):
         dx_dt[i] = sum(coeff * calculate_term_value(term, X) for coeff, term in causal_params[i].items())
 
+    if noise_std > 0:
+        # Generate noise time series
+        noise_values = noise_std * np.random.randn(n)
+        dx_dt = [dx + noise for dx, noise in zip(dx_dt, noise_values)]
+
     return dx_dt
+
 
 def plot_time_series(t, X, n, causal_params=None):
     # Extract the time series data for each variable
@@ -130,9 +143,12 @@ def plot_time_series(t, X, n, causal_params=None):
     plt.show()
 
 
+'''
+Helper functions for converting terms (as n-arrays) into strings
+'''
+
 # Function to convert term values into a sum representation
 def rhs_as_sum(terms):
-    print('terms:', terms)
     term_strings = []
     for coeff, term in terms:
         if all(term[j] == 0 for j in range(len(term))):
@@ -150,6 +166,15 @@ def rhs_as_sum(terms):
     else:
         return '0'
 
+def get_termstring(term):
+    term_string = ''
+    for j in range(len(term)):
+        if term[j] > 0:
+            term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
+    if all(term[j] == 0 for j in range(len(term))):
+        term_string += '1'
+    return term_string
+
 # Function to scale variables to prevent large jumps
 def scale_variables(X, scaling_factors):
     return X / scaling_factors
@@ -158,7 +183,7 @@ def scale_variables(X, scaling_factors):
 def exceeds_threshold(X, threshold):
     return any(np.abs(X) > threshold)
 
-def generate_data(max_reinitialization_attempts, t):
+def generate_data(max_reinitialization_attempts, t, causal_params):
     # Attempt to find suitable initial conditions
     reinitialization_attempts = 0
     while reinitialization_attempts < max_reinitialization_attempts:
@@ -173,7 +198,11 @@ def generate_data(max_reinitialization_attempts, t):
 
         # Solve the system of ODEs with the original initial conditions
         X = odeint(system_of_odes, X0, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
-
+        #
+        # # If the result does not exceed the threshold, break the loop
+        # for i in range(X.shape[1]):  # Assuming X is a 2D NumPy array
+        #     if np.any(X[:, i] > threshold):
+        #         break
         # If the result does not exceed the threshold, break the loop
         if not exceeds_threshold(X[-1], threshold):
             break
@@ -183,17 +212,87 @@ def generate_data(max_reinitialization_attempts, t):
     return X
 
 
+def solve_M(X, n_params, order_mapping, subintervals, t):
+    M = np.zeros((n_params, n_params))
+    # Compute the matrix M
+    for i, subinterval in enumerate(subintervals):
+        t_sub = [t[idx] for idx in subinterval]
+        for j in range(n_params):
+            # extract the n-tuple representing the polynomial term in hand
+            term = order_mapping[j]
+            term_values_in_sub = []
+            for idx in subinterval[0]:
+                term_at_idx = np.prod([X[idx, k] ** term[k] for k in range(len(term))])
+                term_values_in_sub.append(term_at_idx)
+            # integrate the term with respect to the ith subinterval
+            integral = np.trapz(term_values_in_sub, t_sub)
+            # set corresponding matrix entry
+            M[i, j] = integral
+    return M
+
+
+
+
+def solve_parameters(X, subintervals, M, order_mapping):
+    n = X.shape[1]
+    M = np.zeros((n_params, n_params))
+    for i in range(n):
+        x_i = X[:, i]
+        b = compute_level_1_paths(x_i, subintervals)
+        params_i = np.linalg.solve(M, b)
+        print(f'coefficients for {x_i}')
+        for j in range(len(params_i)):
+            if params_i[j] != 0:
+                print(f'{params_i[j]} {get_termstring(order_mapping[j])}')
+
+    return
+
+def compute_level_1_paths(x_i, subintervals):
+    level_1_paths = np.empty((len(subintervals), 1), dtype=np.float64)
+    for i, subinterval in enumerate(subintervals):
+        start = subinterval[0][0]
+        end = subinterval[0][-1]
+        path = x_i[end] - x_i[start]
+        level_1_paths[i, 0] = path
+    return level_1_paths
+
+def generate_subintervals(t, n_params):
+    subintervals = []
+
+    # Create random starting points for the subintervals
+    start_points = np.sort(np.random.choice(t, size=n_params, replace=False))
+
+    # Generate random subinterval end points for each start point
+    end_points = start_points + np.random.uniform(0.01, 1, size=n_params)  # Adjust the range and size as needed
+
+    # Ensure that end points are within the time interval
+    end_points = np.clip(end_points, 0, 1)
+
+    for i in range(n_params):
+        # Find the indices corresponding to the time range
+        indices = np.where((t >= start_points[i]) & (t <= end_points[i]))
+        subintervals.append(indices)
+
+    return subintervals
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    # Choose parameters for maximal degree and numer of variables
+    # Choose parameters for maximal degree and number of variables
     p = 3
-    n = 3
+    n = 2
 
     # Generate the complete degree dictionary
-    degree_dict = generate_complete_degree_dictionary(p, n)
+    degree_dict, order_mapping = generate_complete_degree_dictionary(p, n)
     print("Degree Dictionary:")
     print(degree_dict)
+
+    for d in degree_dict:
+        print('Degree: ', d)
+        for term in degree_dict[d]:
+            print(get_termstring(term))
+    print("Order Dictionary:")
+    print(order_mapping)
 
     # Count the total number of parameters
     n_params = count_params(degree_dict)
@@ -209,12 +308,22 @@ if __name__ == '__main__':
 
     # Maximum number of reinitialization attempts
     max_reinitialization_attempts = 10
-    # Define the time points at which you want to evaluate the solution
-    t = np.linspace(0, 1, 100)  # Increase the number of time points for smoother data
-    X = generate_data(max_reinitialization_attempts, t)
-
+    # Define the time points for each time series
+    t = np.linspace(0, 1, 1000)  # Increase the number of time points for smoother data
+    # genreate the data that is compatible with the specified causal relationships
+    X = generate_data(max_reinitialization_attempts, t, causal_params)
     # Plot the time series data
     plot_time_series(t, X, n, causal_params)
+
+    # print('X_0:', X[: ,0])
+    '''
+    Solving with signature matching
+    '''
+    # generate the subintervals that will be used to compute the level-1 path signatures on different windows
+    subintervals = generate_subintervals(t, n_params)
+    M = solve_M(X, n_params, order_mapping, subintervals, t)
+    print(M)
+    solve_parameters(X, subintervals, M, order_mapping)
 
 
 
