@@ -90,19 +90,32 @@ def system_of_odes(X, t, causal_params):
 
     return dx_dt
 
-
-def plot_time_series(t, X, n):
-    # Assuming you have already solved the ODEs and have the time series data in the X array.
-    # n is the number of variables.
+def plot_time_series(t, X, n, causal_params=None):
     # Extract the time series data for each variable
-    variable_names = [f'x{i}' for i in range(1, n + 1)]  # Variable names x1, x2, ..., xn
+    variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
 
     # Plot each variable
     plt.figure(figsize=(10, 6))
 
     for i in range(n):
-        # plot time series data for ith variable
+        # Plot time series data for ith variable
         plt.plot(t, X[:, i], label=variable_names[i])
+
+        # Display causal relationships if available
+        if causal_params is not None and i in causal_params:
+            terms = causal_params[i].items()
+            causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+
+            # Calculate the position for the text box near the curve
+            x_position = t[-1] - 0.1  # Slightly to the left of the end of the curve
+            y_position = X[-1, i]
+
+            # Define the text box properties
+            textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
+
+
+            # Create a multiline text box
+            plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
 
     # Customize the plot
     plt.xlabel('Time')
@@ -117,31 +130,96 @@ def plot_time_series(t, X, n):
     plt.show()
 
 
+# Function to convert term values into a sum representation
+def rhs_as_sum(terms):
+    print('terms:', terms)
+    term_strings = []
+    for coeff, term in terms:
+        if all(term[j] == 0 for j in range(len(term))):
+            term_strings.append(f'{coeff:.2f}')
+        else:
+            coeff_string = f'{coeff:.2f}'
+            term_string = ''
+            for j in range(len(term)):
+                if term[j] > 0:
+                    term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
+            term_strings.append(coeff_string + term_string)
+    if len(terms) > 0:
+        polynomial_str = ' + '.join(term_strings)
+        return polynomial_str
+    else:
+        return '0'
+
+# Function to scale variables to prevent large jumps
+def scale_variables(X, scaling_factors):
+    return X / scaling_factors
+
+# Function to check if any value in X exceeds a threshold (e.g., 10^5)
+def exceeds_threshold(X, threshold):
+    return any(np.abs(X) > threshold)
+
+def generate_data(max_reinitialization_attempts, t):
+    # Attempt to find suitable initial conditions
+    reinitialization_attempts = 0
+    while reinitialization_attempts < max_reinitialization_attempts:
+        X0 = np.random.uniform(-1, 1, n)  # Initialize X0 with random values between -1 and 1
+
+        # Solve the system of ODEs with scaled variables
+        X_scaled = scale_variables(X0, np.max(X0))  # Scale the initial conditions
+        X_smooth = odeint(system_of_odes, X_scaled, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
+
+        # Reverse the scaling to obtain realistic data
+        X_smooth = scale_variables(X_smooth, np.max(X0))
+
+        # Solve the system of ODEs with the original initial conditions
+        X = odeint(system_of_odes, X0, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
+
+        # If the result does not exceed the threshold, break the loop
+        if not exceeds_threshold(X[-1], threshold):
+            break
+        reinitialization_attempts += 1
+        if reinitialization_attempts == max_reinitialization_attempts:
+            print("Warning: Maximum reinitialization attempts reached.")
+    return X
+
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    # Example usage:
+    # Choose parameters for maximal degree and numer of variables
     p = 3
-    n = 4
+    n = 3
+
+    # Generate the complete degree dictionary
     degree_dict = generate_complete_degree_dictionary(p, n)
+    print("Degree Dictionary:")
     print(degree_dict)
-    print(count_params(degree_dict))
+
+    # Count the total number of parameters
+    n_params = count_params(degree_dict)
+    print("Total Number of Parameters:", n_params)
+
+    # Generate causal parameters based on the degree dictionary
     causal_params = generate_causal_parameters(degree_dict, n)
+    print("Causal Parameters:")
     print(causal_params)
+
     # Initial conditions
-    # X0 = [random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(-1, 1)]
-    X0 = np.ones(n)
-    # Time points at which you want to evaluate the solution
-    t = np.linspace(0, 10, 100)  # Example: from 0 to 10, divided into 100 time points
+    threshold = 1e5
 
-    # Solve the system of ODEs
-    X = odeint(system_of_odes, X0, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
-    plot_time_series(t, X, n)
-    #
-    # X contains the time series data for x1, x2, and x3
-    x1, x2, x3 = X[:, 0], X[:, 1], X[:, 2]
-    # Example usage to access time series data:
-    print("Time Series Data for x1:", x1)
-    print("Time Series Data for x2:", x2)
-    print("Time Series Data for x3:", x3)
+    # Maximum number of reinitialization attempts
+    max_reinitialization_attempts = 10
+    # Define the time points at which you want to evaluate the solution
+    t = np.linspace(0, 1, 100)  # Increase the number of time points for smoother data
+    X = generate_data(max_reinitialization_attempts, t)
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    # Plot the time series data
+    plot_time_series(t, X, n, causal_params)
+
+
+
+    # debugging
+    # # Example usage to access time series data:
+    # for i in range(n):
+    #     variable_data = X[:, i]
+    #     print(f"Time Series Data for x{i + 1}:", variable_data)
