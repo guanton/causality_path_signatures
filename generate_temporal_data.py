@@ -1,23 +1,29 @@
 import numpy as np
 import random
-from itertools import product
+from itertools import product, combinations
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 
 
 def generate_complete_degree_dictionary(p, n):
     """
-    This function returns all possible polynomial relations on (x_1, ..., x_n) up to degree p
+    This function returns all possible monomial relations on (x_1, ..., x_n) up to degree p
     :param p: maximal degree p considered for polynomial relationships dx_i/dt=p(X)
     :param n: number of causal variables x_i
     :return:
-    degree_dict: a dictionary where the keys represent degrees k=0, 1, ..., p, and values represent the list of all
-    possible terms (combos of variables) whose total degree is k. Each combination is given by an n-tuple where entry i
-    in the tuple corresponds to the degree of x_i within the degree k term (ex. [1,0,2] corresponds to x_0*x_2^2 for k=3
+    n_monomials: number of parameters (coefficients for monomials) that we will need to recover using path signatures
+    degree_dict: a dictionary that classifies each monomial by degree. The keys represent degrees k=0, 1, ..., p.
+    The values represent the list of all possible monomials whose total degree is k.
+    Each monomial is represented by a list where entry i corresponds to the degree of x_i in the term
+    (ex. [1,0,2] corresponds to x_0*x_2^2 for k=3)
+    order_mapping: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
+    n_monomials-1) and the value is the corresponding monomial, represented by a list.
     """
     degree_dict = {}
     order_mapping = {}
-    term_order = 0  # Initialize the order counter
+    # Initialize order and count variables
+    term_order = 0
+    n_monomials = 0
     for k in range(p + 1):
         degree_dict[k] = []
         # use itertools.product to generate all possible combinations of n values, where each value is in [0,k]]
@@ -25,23 +31,18 @@ def generate_complete_degree_dictionary(p, n):
             if sum(combo) == k:
                 term = list(combo)
                 degree_dict[k].append(term)
-                order_mapping[term_order] = tuple(term)
-                term_order += 1  # Increment the order
-    return degree_dict, order_mapping
+                order_mapping[term_order] = term
+                # Increment the order and count variables
+                term_order += 1
+                n_monomials += 1
+    return n_monomials, degree_dict, order_mapping
 
 
-def count_params(degree_dict):
-    """
-    This function counts the total number of possible polynomial relations on (x_1, ..., x_n) up to degree p
-    :param degree_dict: dictionary of all possible polynomial causal relations from generate_complete_degree_dictionary
-    :return:
-    n_params: number of parameters (coefficients) that we need to recover using path signatures
-    """
-    n_params = 0
-    for k in degree_dict.keys():
-        n_params += len(degree_dict[k])
-    return n_params
-
+def generate_causal_graph(n, random=True):
+    all_edges = list(combinations(range(n), 2))
+    n_edges = random.randint(0, len(all_edges)-1)
+    edges = random.sample(all_edges, n_edges)
+    return edges
 
 def generate_causal_parameters(degree_dict, n):
     """
@@ -283,7 +284,8 @@ if __name__ == '__main__':
     n = 2
 
     # Generate the complete degree dictionary
-    degree_dict, order_mapping = generate_complete_degree_dictionary(p, n)
+    n_monomials, degree_dict, order_mapping = generate_complete_degree_dictionary(p, n)
+    print(n_monomials)
     print("Degree Dictionary:")
     print(degree_dict)
 
