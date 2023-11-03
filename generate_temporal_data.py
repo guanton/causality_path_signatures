@@ -5,7 +5,8 @@ from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 
 
-def generate_complete_degree_dictionary(p, n):
+
+def generate_monomials(p, n):
     """
     This function returns all possible monomial relations on (x_1, ..., x_n) up to degree p
     :param p: maximal degree p considered for polynomial relationships dx_i/dt=p(X)
@@ -16,11 +17,11 @@ def generate_complete_degree_dictionary(p, n):
     The values represent the list of all possible monomials whose total degree is k.
     Each monomial is represented by a list where entry i corresponds to the degree of x_i in the term
     (ex. [1,0,2] corresponds to x_0*x_2^2 for k=3)
-    order_mapping: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
+    ordered_monomials: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
     n_monomials-1) and the value is the corresponding monomial, represented by a list.
     """
     degree_dict = {}
-    order_mapping = {}
+    ordered_monomials = {}
     # Initialize order and count variables
     term_order = 0
     n_monomials = 0
@@ -31,22 +32,63 @@ def generate_complete_degree_dictionary(p, n):
             if sum(combo) == k:
                 term = list(combo)
                 degree_dict[k].append(term)
-                order_mapping[term_order] = term
+                ordered_monomials[term_order] = term
                 # Increment the order and count variables
                 term_order += 1
                 n_monomials += 1
-    return n_monomials, degree_dict, order_mapping
+    return n_monomials, degree_dict, ordered_monomials
 
 
-def generate_causal_graph(n, random=True):
-    all_edges = list(combinations(range(n), 2))
-    n_edges = random.randint(0, len(all_edges)-1)
-    edges = random.sample(all_edges, n_edges)
-    return edges
-
-def generate_causal_parameters(degree_dict, n):
+def generate_causal_graph(n, specified_edges = None, edge_density = None, include_self_edges = True, random_m = False):
     """
-    This function creates random polynomial causal relations related to each dx_i/dt
+    Generates the graph structure for the temporal data that will be created
+    :param n: number of causal variables x_i in the graph
+    :param specified_edges (optional): list of edges (pairs of vertices)
+    :param edge_density (optional): density of edges in the causal graph
+    :return:
+    nbrs_dict: a dictionary where the keys are vertices and values are the neighbouring vertices
+    """
+    all_edges = list(combinations(range(n), 2))
+    if include_self_edges:
+        all_edges += [(v, v) for v in range(n)]  # Include self-edges
+    if specified_edges is None:
+        if edge_density is None:
+            if random_m:
+                n_edges = random.randint(0, len(all_edges)-1)
+            else:
+                n_edges = len(all_edges)
+        else:
+            m = len(all_edges)
+            n_edges = int(m*edge_density)
+        edges = random.sample(all_edges, n_edges)
+    else:
+        edges = specified_edges
+    # Create an empty dictionary to store the graph structure.
+    nbrs_dict = {v: [] for v in range(n)}
+    for edge in edges:
+        # Add each edge to the neighbours of both vertices.
+        v1, v2 = edge
+        nbrs_dict[v1].append(v2)
+        nbrs_dict[v2].append(v1)
+    return nbrs_dict
+
+
+def check_monomial(term, nbrs):
+    """
+    Helper function that checks whether all factors in a monomial term belong to a list of neighbours
+    :param term: monomial represented by a list
+    :param nbrs: list of vertices (neighbours for some vertex)
+    :return:
+    """
+    vertices_in_monomial = np.nonzero(term)[0]
+    for v in vertices_in_monomial:
+        if v not in nbrs:
+            return False
+    return True
+
+def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None):
+    """
+    This function creates random polynonon_zero_indices = np.nonzero([0, 3, 0, 4, 0, 7, 0])[0]mial causal relations for each dx_i/dt
     :param degree_dict: dictionary of all possible polynomial causal relations from generate_complete_degree_dictionary
     :param n: number of causal variables x_i
     :return:
@@ -54,55 +96,52 @@ def generate_causal_parameters(degree_dict, n):
     dictionary, which captures all polynomial terms for dx_i/dt. The keys of this dictionary are the coefficients and
     the values are the corresponding terms (represented as n-arrays)
     """
+    n = len(nbrs_dict.keys())
+    all_monomials = list(ordered_monomials.values())
     causal_params = {}
-    n_params = count_params(degree_dict)
+    # iterate over each vertex in causal graph
     for i in range(n):
-        # encourage sparser polynomial relations with probability weights
-        weights = [1 / (p+1) for p in range(n_params)]
-        # choose the number of terms in the polynomial for dx_i/dt
-        n_params_i = random.choices(range(n_params), weights=weights)[0]
-        all_terms = [term for k in degree_dict.keys() for term in degree_dict[k]]
-        # select the terms in the polynomial for dx_i/dt
-        selected_terms = random.sample(all_terms, n_params_i)
-        # generate coefficients from random uniform
-        coefficients = [random.uniform(-1, 1) for _ in range(n_params_i)]
-        causal_params[i] = {coeff: term for coeff, term in zip(coefficients, selected_terms)}
+        nbrs = nbrs_dict[i]
+        # select the terms in the polynomial for dx_i/dt based on nbrs of i in causal graph
+        monomials = list(filter(lambda term: check_monomial(term, nbrs), all_monomials))
+        if monomial_density is not None:
+            # drop a proportion of monomials if applicable
+            monomials = random.sample(monomials, int(monomial_density*len(monomials)))
+        n_monomials = len(monomials)
+        # sample coefficients for each monomial
+        coefficients = [random.uniform(-5, 5) for _ in range(n_monomials)]
+        causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials)}
     return causal_params
 
 
-def system_of_odes(X, t, causal_params, noise_std = 0):
-    '''
-    :param X: list of n causal variables (for which we will generate time_series data)
-    :param t: time indices
-    :param causal_params: causal polynomial relationships for each dx_i/dt
-    :param (optional) noise_std: standard deviation of noise (for now added to each time series)
-    :return:
-    '''
-    n = len(X)
-    dx_dt = [0.0] * n
-
-    def calculate_term_value(term, X):
-        '''
-        Helper function that unpacks the term from the n-array representation
-        :param term: n-array representation of term
-        :param X: list of n causal variables
-        :return: value of term
-        '''
-        value = 1.0
-        for i in range(n):
-            value *= X[i] ** term[i]
-        return value
-
+def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10):
+    t = np.linspace(t_min, t_max, n_steps)
+    n = len(causal_params.keys())
+    X = np.zeros((n_steps, n))
+    # set initial values
     for i in range(n):
-        dx_dt[i] = sum(coeff * calculate_term_value(term, X) for coeff, term in causal_params[i].items())
-
-    if noise_std > 0:
-        # Generate noise time series
-        noise_values = noise_std * np.random.randn(n)
-        dx_dt = [dx + noise for dx, noise in zip(dx_dt, noise_values)]
-
-    return dx_dt
-
+        X[0, i] = random.uniform(-1, 1)
+    # Simulate Brownian motion (W(s))
+    W = np.sqrt(t[1] - t[0]) * np.random.randn(n_steps)
+    # Iterate over each time step
+    for step in range(1, n_steps):
+        delta_t = t[step] - t[step - 1]
+        # Iterate over each variable (i)
+        for i in range(n):
+            polynomial_dict = causal_params[i]
+            # Initialize the polynomial value
+            polynomial_value = 0
+            # Iterate over the coefficients and degrees of monomials
+            for coefficient, monomial in polynomial_dict.items():
+                monomial_value = coefficient
+                relevant_variables = [v for v in range(n) if monomial[v] != 0]
+                degrees = [monomial[v] for v in relevant_variables]
+                for v, degree in zip(relevant_variables, degrees):
+                    monomial_value *= X[step - 1, v] ** degree
+                polynomial_value += monomial_value
+            # Update the variable's value for the current time step
+            X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[step]
+    return X
 
 def plot_time_series(t, X, n, causal_params=None):
     # Extract the time series data for each variable
@@ -176,161 +215,41 @@ def get_termstring(term):
         term_string += '1'
     return term_string
 
-# Function to scale variables to prevent large jumps
-def scale_variables(X, scaling_factors):
-    return X / scaling_factors
 
-# Function to check if any value in X exceeds a threshold (e.g., 10^5)
-def exceeds_threshold(X, threshold):
-    return any(np.abs(X) > threshold)
+#
+# # Function to scale variables to prevent large jumps
+# def scale_variables(X, scaling_factors):
+#     return X / scaling_factors
+#
+# # Function to check if any value in X exceeds a threshold (e.g., 10^5)
+# def exceeds_threshold(X, threshold):
+#     return any(np.abs(X) > threshold)
+#
+# def generate_data(max_reinitialization_attempts, t, causal_params):
+#     # Attempt to find suitable initial conditions
+#     reinitialization_attempts = 0
+#     while reinitialization_attempts < max_reinitialization_attempts:
+#         X0 = np.random.uniform(-1, 1, n)  # Initialize X0 with random values between -1 and 1
+#
+#         # Solve the system of ODEs with scaled variables
+#         X_scaled = scale_variables(X0, np.max(X0))  # Scale the initial conditions
+#         X_smooth = odeint(system_of_odes, X_scaled, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
+#
+#         # Reverse the scaling to obtain realistic data
+#         X_smooth = scale_variables(X_smooth, np.max(X0))
+#
+#         # Solve the system of ODEs with the original initial conditions
+#         X = odeint(system_of_odes, X0, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
+#         #
+#         # # If the result does not exceed the threshold, break the loop
+#         # for i in range(X.shape[1]):  # Assuming X is a 2D NumPy array
+#         #     if np.any(X[:, i] > threshold):
+#         #         break
+#         # If the result does not exceed the threshold, break the loop
+#         if not exceeds_threshold(X[-1], threshold):
+#             break
+#         reinitialization_attempts += 1
+#         if reinitialization_attempts == max_reinitialization_attempts:
+#             print("Warning: Maximum reinitialization attempts reached.")
+#     return X
 
-def generate_data(max_reinitialization_attempts, t, causal_params):
-    # Attempt to find suitable initial conditions
-    reinitialization_attempts = 0
-    while reinitialization_attempts < max_reinitialization_attempts:
-        X0 = np.random.uniform(-1, 1, n)  # Initialize X0 with random values between -1 and 1
-
-        # Solve the system of ODEs with scaled variables
-        X_scaled = scale_variables(X0, np.max(X0))  # Scale the initial conditions
-        X_smooth = odeint(system_of_odes, X_scaled, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
-
-        # Reverse the scaling to obtain realistic data
-        X_smooth = scale_variables(X_smooth, np.max(X0))
-
-        # Solve the system of ODEs with the original initial conditions
-        X = odeint(system_of_odes, X0, t, args=(causal_params,), rtol=1e-8, atol=1e-8)
-        #
-        # # If the result does not exceed the threshold, break the loop
-        # for i in range(X.shape[1]):  # Assuming X is a 2D NumPy array
-        #     if np.any(X[:, i] > threshold):
-        #         break
-        # If the result does not exceed the threshold, break the loop
-        if not exceeds_threshold(X[-1], threshold):
-            break
-        reinitialization_attempts += 1
-        if reinitialization_attempts == max_reinitialization_attempts:
-            print("Warning: Maximum reinitialization attempts reached.")
-    return X
-
-
-def solve_M(X, n_params, order_mapping, subintervals, t):
-    M = np.zeros((n_params, n_params))
-    # Compute the matrix M
-    for i, subinterval in enumerate(subintervals):
-        t_sub = [t[idx] for idx in subinterval]
-        for j in range(n_params):
-            # extract the n-tuple representing the polynomial term in hand
-            term = order_mapping[j]
-            term_values_in_sub = []
-            for idx in subinterval[0]:
-                term_at_idx = np.prod([X[idx, k] ** term[k] for k in range(len(term))])
-                term_values_in_sub.append(term_at_idx)
-            # integrate the term with respect to the ith subinterval
-            integral = np.trapz(term_values_in_sub, t_sub)
-            # set corresponding matrix entry
-            M[i, j] = integral
-    return M
-
-
-
-
-def solve_parameters(X, subintervals, M, order_mapping):
-    n = X.shape[1]
-    M = np.zeros((n_params, n_params))
-    for i in range(n):
-        x_i = X[:, i]
-        b = compute_level_1_paths(x_i, subintervals)
-        params_i = np.linalg.solve(M, b)
-        print(f'coefficients for {x_i}')
-        for j in range(len(params_i)):
-            if params_i[j] != 0:
-                print(f'{params_i[j]} {get_termstring(order_mapping[j])}')
-
-    return
-
-def compute_level_1_paths(x_i, subintervals):
-    level_1_paths = np.empty((len(subintervals), 1), dtype=np.float64)
-    for i, subinterval in enumerate(subintervals):
-        start = subinterval[0][0]
-        end = subinterval[0][-1]
-        path = x_i[end] - x_i[start]
-        level_1_paths[i, 0] = path
-    return level_1_paths
-
-def generate_subintervals(t, n_params):
-    subintervals = []
-
-    # Create random starting points for the subintervals
-    start_points = np.sort(np.random.choice(t, size=n_params, replace=False))
-
-    # Generate random subinterval end points for each start point
-    end_points = start_points + np.random.uniform(0.01, 1, size=n_params)  # Adjust the range and size as needed
-
-    # Ensure that end points are within the time interval
-    end_points = np.clip(end_points, 0, 1)
-
-    for i in range(n_params):
-        # Find the indices corresponding to the time range
-        indices = np.where((t >= start_points[i]) & (t <= end_points[i]))
-        subintervals.append(indices)
-
-    return subintervals
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    # Choose parameters for maximal degree and number of variables
-    p = 3
-    n = 2
-
-    # Generate the complete degree dictionary
-    n_monomials, degree_dict, order_mapping = generate_complete_degree_dictionary(p, n)
-    print(n_monomials)
-    print("Degree Dictionary:")
-    print(degree_dict)
-
-    for d in degree_dict:
-        print('Degree: ', d)
-        for term in degree_dict[d]:
-            print(get_termstring(term))
-    print("Order Dictionary:")
-    print(order_mapping)
-
-    # Count the total number of parameters
-    n_params = count_params(degree_dict)
-    print("Total Number of Parameters:", n_params)
-
-    # Generate causal parameters based on the degree dictionary
-    causal_params = generate_causal_parameters(degree_dict, n)
-    print("Causal Parameters:")
-    print(causal_params)
-
-    # Initial conditions
-    threshold = 1e5
-
-    # Maximum number of reinitialization attempts
-    max_reinitialization_attempts = 10
-    # Define the time points for each time series
-    t = np.linspace(0, 1, 1000)  # Increase the number of time points for smoother data
-    # genreate the data that is compatible with the specified causal relationships
-    X = generate_data(max_reinitialization_attempts, t, causal_params)
-    # Plot the time series data
-    plot_time_series(t, X, n, causal_params)
-
-    # print('X_0:', X[: ,0])
-    '''
-    Solving with signature matching
-    '''
-    # generate the subintervals that will be used to compute the level-1 path signatures on different windows
-    subintervals = generate_subintervals(t, n_params)
-    M = solve_M(X, n_params, order_mapping, subintervals, t)
-    print(M)
-    solve_parameters(X, subintervals, M, order_mapping)
-
-
-
-    # debugging
-    # # Example usage to access time series data:
-    # for i in range(n):
-    #     variable_data = X[:, i]
-    #     print(f"Time Series Data for x{i + 1}:", variable_data)
