@@ -41,7 +41,7 @@ if __name__ == '__main__':
     '''
     # generate the subintervals that will be used to compute the level-1 path signatures on different windows
     subintervals = generate_subintervals(t, n_monomials)
-    M = solve_M(X, n_monomials, ordered_monomials, subintervals, t)
+    M = solve_M(X, n_monomials, ordered_monomials, subintervals, t, n)
     print(M)
     solve_parameters(X, n_monomials, subintervals, M, ordered_monomials)
 
