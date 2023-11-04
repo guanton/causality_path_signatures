@@ -4,26 +4,15 @@ from signature_matching_polynomial_relations import *
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Choose parameters for maximal degree and number of variables
-    p = 4
+    p = 3
     n = 2
 
     # Generate the complete degree dictionary
     n_monomials, degree_dict, ordered_monomials = generate_monomials(p, n)
-    print(n_monomials)
-    print("Degree Dictionary:")
-    print(degree_dict)
-
-    for d in degree_dict:
-        print('Degree: ', d)
-        for term in degree_dict[d]:
-            print(get_termstring(term))
-    print("Order Dictionary:")
-    print(ordered_monomials)
-
     nbrs_dict = generate_causal_graph(n)
 
     # Generate causal parameters based on the degree dictionary
-    causal_params = generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density=0.1)
+    causal_params = generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density=0.2)
     print("Causal Parameters:")
     print(causal_params)
 
@@ -35,7 +24,6 @@ if __name__ == '__main__':
     # Plot the time series data
     plot_time_series(t, X, n, causal_params)
 
-    # print('X_0:', X[: ,0])
     '''
     Solving with signature matching
     '''

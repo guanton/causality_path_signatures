@@ -78,7 +78,7 @@ def solve_M(X, n_params, order_mapping, subintervals, t, n):
     return M
 
 
-def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, tol = 1e-2):
+def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, tol = 1e-1, solver = 'direct'):
     """
 
     :param X: time series data for all variables x_i
@@ -97,11 +97,14 @@ def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, to
         x_i = X[:, i]
         # compute b using the level 1 iterated integrals
         b = compute_level_1_paths(x_i, subintervals)
-        # Use Ridge regression with regularization
-        clf = Ridge(alpha=alpha)
-        clf.fit(M, b)
-        params_i = clf.coef_
-        coefficients[i] = params_i
+        if solver == 'ridge':
+            # Use Ridge regression with regularization
+            clf = Ridge(alpha=alpha)
+            clf.fit(M, b)
+            params_i = clf.coef_
+            coefficients[i] = params_i
+        elif solver == 'direct':
+            params_i = np.linalg.solve(M, b)
         print(f'dx_{i}/dt=')
         # print(params_i)
         for j in range(len(params_i[0])):

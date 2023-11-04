@@ -114,15 +114,17 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
     return causal_params
 
 
-def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10):
+def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10, noise_addition = True):
     t = np.linspace(t_min, t_max, n_steps)
     n = len(causal_params.keys())
     X = np.zeros((n_steps, n))
     # set initial values
-    for i in range(n):
-        X[0, i] = random.uniform(-1, 1)
-    # Simulate Brownian motion (W(s))
-    W = np.sqrt(t[1] - t[0]) * np.random.randn(n_steps)
+    if noise_addition:
+        W = []
+        for i in range(n):
+            X[0, i] = random.uniform(-1, 1)
+            # Simulate Brownian motion (W(s))
+            W.append(np.sqrt(t[1] - t[0]) * np.random.randn(n_steps))
     # Iterate over each time step
     for step in range(1, n_steps):
         delta_t = t[step] - t[step - 1]
@@ -140,7 +142,10 @@ def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10):
                     monomial_value *= X[step - 1, v] ** degree
                 polynomial_value += monomial_value
             # Update the variable's value for the current time step
-            X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[step]
+            if noise_addition:
+                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step]
+            else:
+                X[step, i] = X[step - 1, i] + polynomial_value * delta_t
     return X
 
 def plot_time_series(t, X, n, causal_params=None):
