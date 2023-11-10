@@ -86,9 +86,9 @@ def check_monomial(term, nbrs):
             return False
     return True
 
-def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None):
+def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None, specified_coeffs = None):
     """
-    This function creates random polynonon_zero_indices = np.nonzero([0, 3, 0, 4, 0, 7, 0])[0]mial causal relations for each dx_i/dt
+    This function creates random polynomial causal relations for each dx_i/dt
     :param degree_dict: dictionary of all possible polynomial causal relations from generate_complete_degree_dictionary
     :param n: number of causal variables x_i
     :return:
@@ -103,19 +103,38 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
     for i in range(n):
         nbrs = nbrs_dict[i]
         # select the terms in the polynomial for dx_i/dt based on nbrs of i in causal graph
-        monomials = list(filter(lambda term: check_monomial(term, nbrs), all_monomials))
+        valid_monomials_i = list(filter(lambda term: check_monomial(term, nbrs), all_monomials))
         if monomial_density is not None:
             # drop a proportion of monomials if applicable
-            monomials = random.sample(monomials, int(monomial_density*len(monomials)))
-        n_monomials = len(monomials)
-        # sample coefficients for each monomial
-        coefficients = [random.uniform(-5, 5) for _ in range(n_monomials)]
-        causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials)}
+            monomials_i = random.sample(valid_monomials_i, int(monomial_density*len(valid_monomials_i)))
+            n_monomials_i = len(monomials_i)
+        else:
+            monomials_i = valid_monomials_i
+            n_monomials_i = len(valid_monomials_i)
+        if specified_coeffs is None:
+            # sample coefficients for each monomial
+            coefficients = [random.uniform(-5, 5) for _ in range(n_monomials_i)]
+            causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials_i)}
+        else:
+            assert len(specified_coeffs[i]) == len(all_monomials), f"the number of specified coefficients {len(specified_coeffs)}" \
+                                                              f"does not match the number of monomials {len(all_monomials)}"
+
+            coefficients = specified_coeffs[i]
+            causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials_i)}
     return causal_params
 
 
-def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10, noise_addition = True):
-    t = np.linspace(t_min, t_max, n_steps)
+def generate_temporal_data(causal_params, t, noise_addition = True, n_series = 1):
+    """
+    :param causal_params:
+    :param t_min:
+    :param t_max:
+    :param n_steps:
+    :param noise_addition:
+    :param n_series:
+    :return:
+    """
+    n_steps = len(t)
     n = len(causal_params.keys())
     X = np.zeros((n_steps, n))
     # set initial values
@@ -123,8 +142,11 @@ def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10, nois
         W = []
         for i in range(n):
             X[0, i] = random.uniform(-1, 1)
-            # Simulate Brownian motion (W(s))
-            W.append(np.sqrt(t[1] - t[0]) * np.random.randn(n_steps))
+            # Simulate Brownian motion noise for each variable x_i
+            W_i = []
+            for step in range(1, n_steps):
+                W_i.append(np.random.randn() * np.sqrt(t[step]-t[step-1]))
+            W.append(W_i)
     # Iterate over each time step
     for step in range(1, n_steps):
         delta_t = t[step] - t[step - 1]
@@ -143,10 +165,40 @@ def generate_temporal_data(causal_params, t_min=0, t_max = 1, n_steps = 10, nois
                 polynomial_value += monomial_value
             # Update the variable's value for the current time step
             if noise_addition:
-                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step]
+                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step-1]
             else:
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t
     return X
+
+def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False, n_series=1):
+    """
+    :param n: Number of causal variables
+    :param temporal_functions: list of functions where ith function determines variable i
+    :param t_min: Minimum time
+    :param t_max: Maximum time
+    :param n_steps: Number of time steps
+    :param noise_addition: Whether to add noise
+    :param n_series: Number of series to generate
+    :return: Generated time series data
+    """
+    assert n == len(temporal_functions), "number of variables does not match number of functions"
+    t = np.linspace(t_min, t_max, n_steps)
+    X = np.zeros((n_steps, n))
+    # set initial values
+    if noise_addition:
+        W = []
+        for i in range(n):
+            X[0, i] = random.uniform(-1, 1)
+            # Simulate Brownian motion (W(s))
+            W.append(np.sqrt(t[1] - t[0]) * np.random.randn(n_steps))
+    for step in range(n_steps):
+        for i in range(n):
+            # Calculate the value for each x_i(t) based on functions
+            X[step, i] = temporal_functions[i](t[step])
+            if noise_addition:
+                X[step, i] += W[i][step]
+    return X
+
 
 def plot_time_series(t, X, n, causal_params=None):
     # Extract the time series data for each variable
@@ -193,7 +245,7 @@ Helper functions for converting terms (as n-arrays) into strings
 '''
 
 # Function to convert term values into a sum representation
-def rhs_as_sum(terms):
+def rhs_as_sum(terms, latex = True):
     term_strings = []
     for coeff, term in terms:
         if all(term[j] == 0 for j in range(len(term))):
@@ -203,7 +255,7 @@ def rhs_as_sum(terms):
             term_string = ''
             for j in range(len(term)):
                 if term[j] > 0:
-                    term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
+                    term_string += get_termstring(term, latex)#f'$x_{{{j}}}^{{{term[j]}}}$'
             term_strings.append(coeff_string + term_string)
     if len(terms) > 0:
         polynomial_str = ' + '.join(term_strings)
@@ -211,11 +263,14 @@ def rhs_as_sum(terms):
     else:
         return '0'
 
-def get_termstring(term):
+def get_termstring(term, latex = False):
     term_string = ''
     for j in range(len(term)):
         if term[j] > 0:
-            term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
+            if latex:
+                term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
+            else:
+                term_string += f'x_{j}^{term[j]}'
     if all(term[j] == 0 for j in range(len(term))):
         term_string += '1'
     return term_string
