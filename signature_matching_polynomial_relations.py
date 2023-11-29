@@ -78,7 +78,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     return M
 
 
-def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, tol = 1e-1, solver = 'direct'):
+def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=0, tol = 1e-1, solver = 'direct'):
     """
 
     :param X: time series data for all variables x_i

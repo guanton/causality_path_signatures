@@ -1,9 +1,7 @@
 import numpy as np
 import random
 from itertools import product, combinations
-from scipy.integrate import odeint
 import matplotlib.pyplot as plt
-
 
 
 def generate_monomials(p, n):
@@ -22,9 +20,7 @@ def generate_monomials(p, n):
     """
     degree_dict = {}
     ordered_monomials = {}
-    # Initialize order and count variables
     term_order = 0
-    n_monomials = 0
     for k in range(p + 1):
         degree_dict[k] = []
         # use itertools.product to generate all possible combinations of n values, where each value is in [0,k]]
@@ -35,7 +31,7 @@ def generate_monomials(p, n):
                 ordered_monomials[term_order] = term
                 # Increment the order and count variables
                 term_order += 1
-                n_monomials += 1
+    n_monomials = term_order
     return n_monomials, degree_dict, ordered_monomials
 
 
@@ -75,7 +71,7 @@ def generate_causal_graph(n, specified_edges = None, edge_density = None, includ
 
 def check_monomial(term, nbrs):
     """
-    Helper function that checks whether all factors in a monomial term belong to a list of neighbours
+    Helper function that checks whether all factors in a monomial term correspond to neighbours in the causal graph
     :param term: monomial represented by a list
     :param nbrs: list of vertices (neighbours for some vertex)
     :return:
@@ -86,7 +82,7 @@ def check_monomial(term, nbrs):
             return False
     return True
 
-def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None, specified_coeffs = None):
+def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None, specified_coeffs = None, n_seed = None, ensure_constant = True):
     """
     This function creates random polynomial causal relations for each dx_i/dt
     :param degree_dict: dictionary of all possible polynomial causal relations from generate_complete_degree_dictionary
@@ -96,6 +92,9 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
     dictionary, which captures all polynomial terms for dx_i/dt. The keys of this dictionary are the coefficients and
     the values are the corresponding terms (represented as n-arrays)
     """
+    if n_seed is not None:
+        random.seed(n_seed)
+        print(f'Set seed to {n_seed}')
     n = len(nbrs_dict.keys())
     all_monomials = list(ordered_monomials.values())
     causal_params = {}
@@ -124,7 +123,7 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
     return causal_params
 
 
-def generate_temporal_data(causal_params, t, noise_addition = True, n_series = 1):
+def generate_temporal_data(causal_params, t, noise = None, n_series = 1, zero_init=True):
     """
     :param causal_params:
     :param t_min:
@@ -137,16 +136,28 @@ def generate_temporal_data(causal_params, t, noise_addition = True, n_series = 1
     n_steps = len(t)
     n = len(causal_params.keys())
     X = np.zeros((n_steps, n))
-    # set initial values
-    if noise_addition:
+    # create noise time series
+    if noise is not None:
         W = []
         for i in range(n):
-            X[0, i] = random.uniform(-1, 1)
             # Simulate Brownian motion noise for each variable x_i
             W_i = []
-            for step in range(1, n_steps):
-                W_i.append(np.random.randn() * np.sqrt(t[step]-t[step-1]))
+            if noise == 'driving':
+                for step in range(1, n_steps):
+                    scale = 0.1
+                    W_i.append(np.random.randn() * scale* np.sqrt(t[step]-t[step-1]))
+            elif noise == 'measurement':
+                for step in range(0, n_steps):
+                    scale = 0.1
+                    W_i.append(np.random.randn() * scale) # standard normal noise
             W.append(W_i)
+    # set initial values
+    if zero_init:
+        for i in range(n):
+            X[0, i] = 0
+    else:
+        for i in range(n):
+            X[0, i] = random.uniform(-1, 1)
     # Iterate over each time step
     for step in range(1, n_steps):
         delta_t = t[step] - t[step - 1]
@@ -164,8 +175,10 @@ def generate_temporal_data(causal_params, t, noise_addition = True, n_series = 1
                     monomial_value *= X[step - 1, v] ** degree
                 polynomial_value += monomial_value
             # Update the variable's value for the current time step
-            if noise_addition:
+            if noise == 'driving':
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step-1]
+            elif noise == 'measurement':
+                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step]
             else:
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t
     return X
@@ -240,6 +253,46 @@ def plot_time_series(t, X, n, causal_params=None):
     plt.show()
 
 
+
+def plot_time_series_comp(t, X, X_, n, causal_params=None):
+    # Extract the time series data for each variable
+    variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
+
+    # Plot each variable for the original data (X)
+    plt.figure(figsize=(12, 6))
+    # Plot each variable for the original data (X)
+    for i in range(n):
+        color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
+        plt.plot(t, X[:, i], label=f'{variable_names[i]} (Original)', linestyle='-', color=color)
+        plt.plot(t, X_[:, i], linestyle='--', label=f'{variable_names[i]} (Noisy)', color=color)
+        # Display causal relationships if available
+        if causal_params is not None and i in causal_params:
+            terms = causal_params[i].items()
+            causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+
+            # Calculate the position for the text box near the curve
+            x_position = t[-1] - 0.1  # Slightly to the left of the end of the curve
+            y_position = X_[-1, i]
+
+            # Define the text box properties
+            textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
+
+            # Create a multiline text box
+            plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
+
+    # Customize the plot
+    plt.xlabel('Time')
+    plt.ylabel('Value')
+    plt.title('Time Series Data with Causal Relationships')
+
+    # Add a legend to label each variable
+    plt.legend()
+
+    # Show the plot
+    plt.grid()
+    plt.show()
+
+
 '''
 Helper functions for converting terms (as n-arrays) into strings
 '''
@@ -275,6 +328,14 @@ def get_termstring(term, latex = False):
         term_string += '1'
     return term_string
 
+def print_causal_relationships(causal_params):
+    n = len(causal_params.keys())
+    for i in range(n):
+        # Display causal relationships if available
+        if causal_params is not None and i in causal_params:
+            terms = causal_params[i].items()
+            causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
+        print(causal_str)
 
 #
 # # Function to scale variables to prevent large jumps
