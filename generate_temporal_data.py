@@ -11,28 +11,21 @@ def generate_monomials(p, n):
     :param n: number of causal variables x_i
     :return:
     n_monomials: number of parameters (coefficients for monomials) that we will need to recover using path signatures
-    degree_dict: a dictionary that classifies each monomial by degree. The keys represent degrees k=0, 1, ..., p.
-    The values represent the list of all possible monomials whose total degree is k.
-    Each monomial is represented by a list where entry i corresponds to the degree of x_i in the term
-    (ex. [1,0,2] corresponds to x_0*x_2^2 for k=3)
     ordered_monomials: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
     n_monomials-1) and the value is the corresponding monomial, represented by a list.
     """
-    degree_dict = {}
     ordered_monomials = {}
     term_order = 0
     for k in range(p + 1):
-        degree_dict[k] = []
         # use itertools.product to generate all possible combinations of n values, where each value is in [0,k]]
         for combo in product(range(k + 1), repeat=n):
             if sum(combo) == k:
                 term = list(combo)
-                degree_dict[k].append(term)
                 ordered_monomials[term_order] = term
                 # Increment the order and count variables
                 term_order += 1
     n_monomials = term_order
-    return n_monomials, degree_dict, ordered_monomials
+    return n_monomials, ordered_monomials
 
 
 def generate_causal_graph(n, specified_edges = None, edge_density = None, include_self_edges = True, random_m = False):
@@ -84,9 +77,13 @@ def check_monomial(term, nbrs):
 
 def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None, specified_coeffs = None, n_seed = None, ensure_constant = True):
     """
-    This function creates random polynomial causal relations for each dx_i/dt
-    :param degree_dict: dictionary of all possible polynomial causal relations from generate_complete_degree_dictionary
-    :param n: number of causal variables x_i
+    :param nbrs_dict: a dictionary where the keys are vertices and values are the neighbouring vertices
+    :param ordered_monomials: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
+    n_monomials-1) and the value is the corresponding monomial, represented by a list.
+    :param monomial_density:
+    :param specified_coeffs:
+    :param n_seed:
+    :param ensure_constant:
     :return:
     causal_params: a two-layered dictionary where the key i represents dx_i/dt for variable x_i and the value is another
     dictionary, which captures all polynomial terms for dx_i/dt. The keys of this dictionary are the coefficients and
@@ -117,13 +114,12 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
         else:
             assert len(specified_coeffs[i]) == len(all_monomials), f"the number of specified coefficients {len(specified_coeffs)}" \
                                                               f"does not match the number of monomials {len(all_monomials)}"
-
             coefficients = specified_coeffs[i]
             causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials_i)}
     return causal_params
 
 
-def generate_temporal_data(causal_params, t, noise = None, n_series = 1, zero_init=True):
+def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measurement_noise_scale = 0, n_series = 1, zero_init=True):
     """
     :param causal_params:
     :param t_min:
@@ -137,20 +133,23 @@ def generate_temporal_data(causal_params, t, noise = None, n_series = 1, zero_in
     n = len(causal_params.keys())
     X = np.zeros((n_steps, n))
     # create noise time series
-    if noise is not None:
+    W = None
+    E = None
+    if driving_noise_scale > 0:
         W = []
         for i in range(n):
             # Simulate Brownian motion noise for each variable x_i
             W_i = []
-            if noise == 'driving':
-                for step in range(1, n_steps):
-                    scale = 0.1
-                    W_i.append(np.random.randn() * scale* np.sqrt(t[step]-t[step-1]))
-            elif noise == 'measurement':
-                for step in range(0, n_steps):
-                    scale = 0.1
-                    W_i.append(np.random.randn() * scale) # standard normal noise
+            for step in range(1, n_steps):
+                W_i.append(np.random.randn() * driving_noise_scale* np.sqrt(t[step]-t[step-1]))
             W.append(W_i)
+    if measurement_noise_scale > 0:
+        E = []
+        for i in range(n):
+            E_i = []
+            for step in range(0, n_steps):
+                E_i.append(np.random.randn() * measurement_noise_scale)  # standard normal noise
+            E.append(E_i)
     # set initial values
     if zero_init:
         for i in range(n):
@@ -175,12 +174,14 @@ def generate_temporal_data(causal_params, t, noise = None, n_series = 1, zero_in
                     monomial_value *= X[step - 1, v] ** degree
                 polynomial_value += monomial_value
             # Update the variable's value for the current time step
-            if noise == 'driving':
+            if driving_noise_scale > 0:
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step-1]
-            elif noise == 'measurement':
-                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step]
             else:
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t
+    if measurement_noise_scale > 0:
+        for i in range(n):
+            for step in range(n_steps):
+                X[step, i] += E[i][step]
     return X
 
 def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False, n_series=1):

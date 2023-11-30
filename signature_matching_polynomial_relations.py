@@ -54,7 +54,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     :param n_params: number of parameters to recover
     :param ordered_monomials: dictionary of monomials, ordered
     :param subintervals: list of n_params subintervals
-    :param t: array of times (default: np.linspace(0, 1, 100))
+    :param t: array of times (ex. np.linspace(0, 1, 100))
     :param n: number of variables
     :return:
     """
@@ -78,7 +78,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     return M
 
 
-def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=0, tol = 1e-1, solver = 'direct'):
+def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, tol = 1e-1, solver = 'direct'):
     """
 
     :param X: time series data for all variables x_i

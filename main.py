@@ -2,27 +2,29 @@ from generate_temporal_data import *
 from signature_matching_polynomial_relations import *
 
 
-def generate_time_series(p, n, specified_edges, noise, n_steps, specified_coeffs = None):
+def generate_time_series(p, n, specified_edges, driving_noise_scale, measurement_noise_scale, n_steps, specified_coeffs = None, monomial_density = None):
     '''
     :param p: degree of polynomial relations for SDEs
     :param n: number of causal variables
-    :param specified_edges: list of edges (
-    :param noise:
-    :param n_steps:
-    :param specified_coeffs:
+    :param specified_edges: list of edges (list of pairs)
+    :param driving_noise_scale: scale of the driving noise
+    :param measurement_noise_scale: scale of the measurement noise
+    :param n_steps: number of observations per time series
+    :param monomial_density: proportion of monomials used for causal polynomial relations
+    :param specified_coeffs: optional parameter for
     :return:
     '''
     # Generate the complete degree dictionary
-    n_monomials, degree_dict, ordered_monomials = generate_monomials(p, n)
+    n_monomials, ordered_monomials = generate_monomials(p, n)
     # filter edges based on the specified edges
     nbrs_dict = generate_causal_graph(n, specified_edges=specified_edges)
     # Generate causal parameters
-    causal_params = generate_polynomial_relations(nbrs_dict, ordered_monomials, n_seed=2023, specified_coeffs=specified_coeffs)
+    causal_params = generate_polynomial_relations(nbrs_dict, ordered_monomials, n_seed=2023, specified_coeffs=specified_coeffs, monomial_density=monomial_density)
     print('causal params:', causal_params)
     # Define the time points for each time series
     t = np.linspace(0, 1, n_steps)
     # generate the data that is compatible with the specified causal relationships
-    X = generate_temporal_data(causal_params, t, noise=noise)
+    X = generate_temporal_data(causal_params, t, driving_noise_scale=driving_noise_scale, measurement_noise_scale=measurement_noise_scale)
     return X, t, causal_params, ordered_monomials
 
 def estimate_coefficients(X, t, n, ordered_monomials, solver = 'direct', tol = 0.1):
@@ -38,30 +40,32 @@ def estimate_coefficients(X, t, n, ordered_monomials, solver = 'direct', tol = 0
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Choose parameters for creating the data
-    p = 2 # polynomial degree considered
+    p = 5 # polynomial degree considered
     n = 2 # number of causal variables
-    n_steps = 50 # number of time points per variable
-    specified_edges = [(0,1)] # list of edges in the causal graph
-    noise = None # do not add noise
+    n_steps = 100 # number of time points per variable
+    specified_edges = [(0,1), (0,0), (1,1), (1,0)] # list of edges in the causal graph
+    monomial_density = 0.3
+    driving_noise_scale = 0
+    measurement_noise_scale = 0
     # Generate the data
-    X, t, causal_params, ordered_monomials = generate_time_series(p, n, specified_edges, noise, n_steps)
-
+    X, t, causal_params, ordered_monomials = generate_time_series(p, n, specified_edges, driving_noise_scale, measurement_noise_scale, n_steps, monomial_density=monomial_density)
+    print('Variance of signal: ', np.var(X))
     # Noisy version
-    specified_edges = [(0, 1)]  # list of edges in the causal graph
-    noise = 'driving' # add Brownian motion noise
+    driving_noise_scale = 0
+    measurement_noise_scale = 0.01
     # Generate the data
-    X_, t, causal_params, ordered_monomials = generate_time_series(n, p, specified_edges, noise, n_steps)
+    X_, t, causal_params, ordered_monomials = generate_time_series(p, n, specified_edges, driving_noise_scale, measurement_noise_scale, n_steps, monomial_density=monomial_density)
     # Plot the time series data
     plot_time_series_comp(t, X, X_, n, causal_params)
-
+    W = []
     # Choose parameters for solving coefficients
-    solver = 'direct'
+    solver = 'ridge'
     tol = 0.1
     # Solve parameters from the original data
     print('original: ')
     estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol)
     # Solve parameters from the noisy data
-    print('Driving noise ')
+    print(f'noise ')
     estimate_coefficients(X_, t, n, ordered_monomials, solver=solver, tol=tol)
 
 
