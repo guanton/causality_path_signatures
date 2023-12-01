@@ -1,10 +1,32 @@
 import numpy as np
-from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.linear_model import Ridge, LinearRegression, Lasso
 from generate_temporal_data import get_termstring
 
 
+def generate_all_subintervals(t):
+    subintervals = []
+    n = len(t)
+    for i in range(n):
+        for j in range(i + 1, n):
+            min_t = t[i]
+            max_t = t[j]
+            indices = np.where((t >= min_t) & (t <= max_t))
+            subintervals.append(indices[0])
+    return subintervals
 
-def generate_all_subintervals(t, random_start = False):
+def generate_random_subintervals(t, n):
+    subintervals = []
+    n_points = len(t)
+    for _ in range(n):
+        # Randomly choose indices for min_t and max_t
+        min_index = np.random.randint(0, n_points-1)
+        max_index = np.random.randint(min_index + 1, n_points)  # Ensure max_index > min_index
+        # Extract subinterval indices
+        indices = np.where((t >= t[min_index]) & (t <= t[max_index]))
+        subintervals.append(indices[0])
+    return subintervals
+
+def generate_all_subintervals_0(t, random_start = False):
     subintervals = []
     min_t = t[0]
     for i in range(1, len(t)):
@@ -13,7 +35,7 @@ def generate_all_subintervals(t, random_start = False):
         subintervals.append(indices[0])
     return subintervals
 
-def generate_subintervals(t, n_params, random_start = False):
+def generate_subintervals_n_params(t, n_params, random_start = False):
     '''
     generates a random set of subintervals on which we will compute iterated integarals
     :param t: array of times (default: np.linspace(0, 1, 100))
@@ -68,7 +90,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     :param n: number of variables
     :return:
     """
-    M = np.zeros((len(t)-1, n_params))
+    M = np.zeros((len(subintervals), n_params))
     # iterate over the subintervals to determine the rows
     for i, subinterval in enumerate(subintervals):
         # retrieve the actual time values of the subinterval
@@ -88,7 +110,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     return M
 
 
-def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, tol = 1e-1, solver = 'direct'):
+def solve_parameters(X, n_monomials, subintervals, M, ordered_monomials, alpha=1, tol = 1e-1, solver = 'direct'):
     """
 
     :param X: time series data for all variables x_i
@@ -96,15 +118,15 @@ def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, to
     :param subintervals: list of n_monomials subintervals
     :param M:  matrix M (n_params x n_params) for variable x_i (it is assumed we use the same subintervals for each
     variable and hence the same matrix M).
-    :param order_mapping: dictionary of monomials, ordered
+    :param ordered_monomials: dictionary of monomials, ordered
     :param alpha: regularization parameter for ridge regression (L^2)
     :param tol: sparsity filter for reporting terms
     :return:
     """
+    recovered_causal_params = {}
     n = X.shape[1]
-    # Initialize an empty array to store the coefficients
-    coefficients = np.zeros((n, n_monomials))
     for i in range(n):
+        recovered_causal_params[i] = {}
         x_i = X[:, i]
         # compute b using the level 1 iterated integrals
         b = compute_level_1_paths(x_i, subintervals)
@@ -113,35 +135,39 @@ def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, to
             clf = Ridge(alpha=alpha)
             clf.fit(M, b)
             params_i = clf.coef_[0]
-            coefficients[i] = params_i
         if solver == 'LR':
             model = LinearRegression().fit(M, b)
             params_i = [x[0] for x in model.coef_.T]
-            coefficients[i] = params_i
         if solver == 'OLS':
             params_i, residuals, rank, singular_values = np.linalg.lstsq(M, b, rcond=None)
             params_i = [x[0] for x in params_i]
-            coefficients[i] = params_i
         if solver == 'pseudo-inverse':
             params_i = [x[0] for x in np.linalg.pinv(M) @ b]
-            coefficients[i] = params_i
-
-        # elif solver == 'direct':
-        #     params_i = np.linalg.solve(M, b)
+        if solver == 'lasso':
+            # Use Ridge regression with regularization
+            clf = Lasso(alpha=alpha)
+            clf.fit(M, b)
+            params_i = clf.coef_
+            print('params_lasso:', params_i)
+        elif solver == 'direct':
+            params_i = np.linalg.solve(M, b)
         #     string = f'dx_{i}/dt='
         #     for j in range(len(params_i)):
         #         if abs(params_i[j][0]) > tol:
-        #             string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
+        #             string += f'{round(params_i[0][j],2)} {get_termstring(ordered_monomials[j])} +'
         #     string = string[:-1]
         #     print(string)
-        string = f'dx_{i}/dt='
+        recovered_causal_params[i] = {}
+        for j in range(n_monomials):
+            if abs(params_i[j]) > tol:
+                recovered_causal_params[i][params_i[j]]=ordered_monomials[j]
+        string = f'dx_{i}/dt= '
         for j in range(len(params_i)):
             if abs(params_i[j]) > tol:
-                string += f'{round(params_i[j], 2)} {get_termstring(order_mapping[j])} +'
+                string += f'{round(params_i[j], 2)}{get_termstring(ordered_monomials[j])} +'
         string = string[:-1]
         print(string)
-
-    return coefficients
+    return recovered_causal_params
 #
 # def solve_parameters(X, n_monomials, subintervals, M, order_mapping):
 #     n = X.shape[1]

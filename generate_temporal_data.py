@@ -1,7 +1,10 @@
+import matplotlib
 import numpy as np
 import random
 from itertools import product, combinations
 import matplotlib.pyplot as plt
+matplotlib.use('TkAgg')
+
 
 
 def generate_monomials(p, n):
@@ -55,9 +58,8 @@ def generate_causal_graph(n, specified_edges = None, edge_density = None, includ
     # Create an empty dictionary to store the graph structure.
     nbrs_dict = {v: [] for v in range(n)}
     for edge in edges:
-        # Add each edge to the neighbours of both vertices.
+        # Add edge
         v1, v2 = edge
-        nbrs_dict[v1].append(v2)
         nbrs_dict[v2].append(v1)
     return nbrs_dict
 
@@ -91,7 +93,6 @@ def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density
     """
     if n_seed is not None:
         random.seed(n_seed)
-        print(f'Set seed to {n_seed}')
     n = len(nbrs_dict.keys())
     all_monomials = list(ordered_monomials.values())
     causal_params = {}
@@ -255,7 +256,7 @@ def plot_time_series(t, X, n, causal_params=None):
 
 
 
-def plot_time_series_comp(t, X, X_, n, causal_params=None):
+def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
     # Extract the time series data for each variable
     variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
 
@@ -264,8 +265,9 @@ def plot_time_series_comp(t, X, X_, n, causal_params=None):
     # Plot each variable for the original data (X)
     for i in range(n):
         color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
-        plt.plot(t, X[:, i], label=f'{variable_names[i]} (Original)', linestyle='-', color=color)
-        plt.plot(t, X_[:, i], linestyle='--', label=f'{variable_names[i]} (Noisy)', color=color)
+        plt.plot(t, X_list[0][:, i], label=f'{variable_names[i]} ({labels[0]})', linestyle='-', color=color)
+        plt.plot(t, X_list[1][:, i], linestyle='--', label=f'{variable_names[i]} ({labels[1]})', color=color)
+        plt.plot(t, X_list[2][:, i], linestyle='-.', marker='^', label=f'{variable_names[i]} ({labels[2]})', color=color)
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
             terms = causal_params[i].items()
@@ -273,7 +275,7 @@ def plot_time_series_comp(t, X, X_, n, causal_params=None):
 
             # Calculate the position for the text box near the curve
             x_position = t[-1] - 0.1  # Slightly to the left of the end of the curve
-            y_position = X_[-1, i]
+            y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
 
             # Define the text box properties
             textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
@@ -292,6 +294,12 @@ def plot_time_series_comp(t, X, X_, n, causal_params=None):
     # Show the plot
     plt.grid()
     plt.show()
+
+# Example usage:
+t = np.linspace(0, 1, 100)
+X_original = np.random.rand(100, 3)  # Replace with your actual data
+X_noisy = np.random.rand(100, 3)  # Replace with your actual data
+X_recovered = np.random.rand(100, 3)  # Replace with your actual data
 
 
 '''
@@ -325,8 +333,8 @@ def get_termstring(term, latex = False):
                 term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
             else:
                 term_string += f'x_{j}^{term[j]}'
-    if all(term[j] == 0 for j in range(len(term))):
-        term_string += '1'
+    # if all(term[j] == 0 for j in range(len(term))):
+    #     term_string += '1'
     return term_string
 
 def print_causal_relationships(causal_params):
