@@ -1,6 +1,7 @@
 import numpy as np
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Ridge, LinearRegression
 from generate_temporal_data import get_termstring
+
 
 
 def generate_all_subintervals(t, random_start = False):
@@ -111,22 +112,35 @@ def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, to
             # Use Ridge regression with regularization
             clf = Ridge(alpha=alpha)
             clf.fit(M, b)
-            params_i = clf.coef_
+            params_i = clf.coef_[0]
             coefficients[i] = params_i
-            string = f'dx_{i}/dt='
-            for j in range(len(params_i[0])):
-                if abs(params_i[0][j]) > tol:
-                    string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
-            string = string[:-1]
-            print(string)
-        elif solver == 'direct':
-            params_i = np.linalg.solve(M, b)
-            string = f'dx_{i}/dt='
-            for j in range(len(params_i)):
-                if abs(params_i[j][0]) > tol:
-                    string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
-            string = string[:-1]
-            print(string)
+        if solver == 'LR':
+            model = LinearRegression().fit(M, b)
+            params_i = [x[0] for x in model.coef_.T]
+            coefficients[i] = params_i
+        if solver == 'OLS':
+            params_i, residuals, rank, singular_values = np.linalg.lstsq(M, b, rcond=None)
+            params_i = [x[0] for x in params_i]
+            coefficients[i] = params_i
+        if solver == 'pseudo-inverse':
+            params_i = [x[0] for x in np.linalg.pinv(M) @ b]
+            coefficients[i] = params_i
+
+        # elif solver == 'direct':
+        #     params_i = np.linalg.solve(M, b)
+        #     string = f'dx_{i}/dt='
+        #     for j in range(len(params_i)):
+        #         if abs(params_i[j][0]) > tol:
+        #             string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
+        #     string = string[:-1]
+        #     print(string)
+        string = f'dx_{i}/dt='
+        for j in range(len(params_i)):
+            if abs(params_i[j]) > tol:
+                string += f'{round(params_i[j], 2)} {get_termstring(order_mapping[j])} +'
+        string = string[:-1]
+        print(string)
+
     return coefficients
 #
 # def solve_parameters(X, n_monomials, subintervals, M, order_mapping):

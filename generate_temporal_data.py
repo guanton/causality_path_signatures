@@ -374,4 +374,3 @@ def print_causal_relationships(causal_params):
 #         if reinitialization_attempts == max_reinitialization_attempts:
 #             print("Warning: Maximum reinitialization attempts reached.")
 #     return X
-

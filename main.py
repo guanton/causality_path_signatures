@@ -26,31 +26,31 @@ def generate_time_series(p, n, specified_edges, driving_noise_scale, measurement
     X = generate_temporal_data(causal_params, t, driving_noise_scale=driving_noise_scale, measurement_noise_scale=measurement_noise_scale)
     return X, t, causal_params, ordered_monomials
 
-def estimate_coefficients(X, t, n, ordered_monomials, solver = 'direct', tol = 0.1):
+def estimate_coefficients(X, t, n, ordered_monomials, solver = 'direct', tol = 0.1, alpha = None):
     n_monomials = len(ordered_monomials)
     # create the necessary subintervals
     subintervals = generate_all_subintervals(t)
     # create the matrix M
     M = compute_M(X, n_monomials, ordered_monomials, subintervals, t, n)
     print(f'Recovered relations from signature matching using {solver} solver and cutoff {tol}:')
-    solve_parameters(X, n_monomials, subintervals, M, ordered_monomials, solver=solver)
+    solve_parameters(X, n_monomials, subintervals, M, ordered_monomials, solver=solver, alpha = alpha)
 
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Choose parameters for creating the data
-    p = 5 # polynomial degree considered
-    n = 2 # number of causal variables
-    n_steps = 1000 # number of time points per variable
-    specified_edges = [(0,1), (0,0), (1,1), (1,0)] # list of edges in the causal graph
-    monomial_density = 0.3
+    p = 3 # polynomial degree considered
+    n = 2  # number of causal variables
+    n_steps = 100  # number of time points per variable
+    specified_edges = [(0, 1)]  # list of edges in the causal graph
+    monomial_density = None
     driving_noise_scale = 0
     measurement_noise_scale = 0
     # Generate the data
     X, t, causal_params, ordered_monomials = generate_time_series(p, n, specified_edges, driving_noise_scale, measurement_noise_scale, n_steps, monomial_density=monomial_density)
     print('Variance of signal: ', np.var(X))
     # Noisy version
-    driving_noise_scale = 0.1
+    driving_noise_scale = 1
     measurement_noise_scale = 0.1
     # Generate the data
     X_, t, causal_params, ordered_monomials = generate_time_series(p, n, specified_edges, driving_noise_scale, measurement_noise_scale, n_steps, monomial_density=monomial_density)
@@ -59,12 +59,13 @@ if __name__ == '__main__':
     W = []
     # Choose parameters for solving coefficients
     solver = 'ridge'
+    alpha = 1
     tol = 0.1
     # Solve parameters from the original data
     print('Recovered relations from noiseless data: ')
-    estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol)
+    estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol, alpha = alpha)
     # Solve parameters from the noisy data
     print(f'Recovered relations from noisy data: ')
-    estimate_coefficients(X_, t, n, ordered_monomials, solver=solver, tol=tol)
+    estimate_coefficients(X_, t, n, ordered_monomials, solver=solver, tol=tol, alpha = alpha)
 
 
