@@ -3,6 +3,15 @@ from sklearn.linear_model import Ridge
 from generate_temporal_data import get_termstring
 
 
+def generate_all_subintervals(t, random_start = False):
+    subintervals = []
+    min_t = t[0]
+    for i in range(1, len(t)):
+        max_t = t[i]
+        indices = np.where((t >= min_t) & (t <= max_t))
+        subintervals.append(indices[0])
+    return subintervals
+
 def generate_subintervals(t, n_params, random_start = False):
     '''
     generates a random set of subintervals on which we will compute iterated integarals
@@ -58,7 +67,7 @@ def compute_M(X, n_params, ordered_monomials, subintervals, t, n):
     :param n: number of variables
     :return:
     """
-    M = np.zeros((n_params, n_params))
+    M = np.zeros((len(t)-1, n_params))
     # iterate over the subintervals to determine the rows
     for i, subinterval in enumerate(subintervals):
         # retrieve the actual time values of the subinterval
@@ -104,16 +113,20 @@ def solve_parameters(X, n_monomials, subintervals, M, order_mapping, alpha=1, to
             clf.fit(M, b)
             params_i = clf.coef_
             coefficients[i] = params_i
-            print(f'dx_{i}/dt=')
+            string = f'dx_{i}/dt='
             for j in range(len(params_i[0])):
                 if abs(params_i[0][j]) > tol:
-                    print(f'{params_i[0][j]} {get_termstring(order_mapping[j])} +')
+                    string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
+            string = string[:-1]
+            print(string)
         elif solver == 'direct':
             params_i = np.linalg.solve(M, b)
-            print(f'dx_{i}/dt=')
+            string = f'dx_{i}/dt='
             for j in range(len(params_i)):
                 if abs(params_i[j][0]) > tol:
-                    print(f'{params_i[j][0]} {get_termstring(order_mapping[j])} +')
+                    string += f'{round(params_i[0][j],2)} {get_termstring(order_mapping[j])} +'
+            string = string[:-1]
+            print(string)
     return coefficients
 #
 # def solve_parameters(X, n_monomials, subintervals, M, order_mapping):
