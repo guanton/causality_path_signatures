@@ -257,6 +257,14 @@ def plot_time_series(t, X, n, causal_params=None):
 
 
 def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
+    '''
+    :param t:
+    :param X_list: [X given no noise, observed noisy X, recovered X using polynomial relations from noisy)
+    :param labels:
+    :param n:
+    :param causal_params:
+    :return:
+    '''
     # Extract the time series data for each variable
     variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
 
