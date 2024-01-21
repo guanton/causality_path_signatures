@@ -1,10 +1,10 @@
-import matplotlib
-import numpy as np
 import random
-from itertools import product, combinations
+from itertools import product, cycle
+import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+import re
 matplotlib.use('TkAgg')
-
 
 
 def generate_monomials(p, n):
@@ -27,100 +27,112 @@ def generate_monomials(p, n):
                 ordered_monomials[term_order] = term
                 # Increment the order and count variables
                 term_order += 1
-    n_monomials = term_order
-    return n_monomials, ordered_monomials
+    print(f'There are {term_order} monomials up to degree {p} over {n} variables')
+    return ordered_monomials
 
-
-def generate_causal_graph(n, specified_edges = None, edge_density = None, include_self_edges = True, random_m = False):
+def generate_causal_graph(m, specified_edges):
     """
     Generates the graph structure for the temporal data that will be created
-    :param n: number of causal variables x_i in the graph
-    :param specified_edges (optional): list of edges (pairs of vertices)
-    :param edge_density (optional): density of edges in the causal graph
+    :param m: number of causal variables x_i in the graph
+    :param specified_edges: list of edges in the graph (pairs of vertices)
     :return:
-    nbrs_dict: a dictionary where the keys are vertices and values are the neighbouring vertices
+    pa_dict: a dictionary where the keys are vertices and values are its parent vertices
     """
-    all_edges = list(combinations(range(n), 2))
-    if include_self_edges:
-        all_edges += [(v, v) for v in range(n)]  # Include self-edges
-    if specified_edges is None:
-        if edge_density is None:
-            if random_m:
-                n_edges = random.randint(0, len(all_edges)-1)
-            else:
-                n_edges = len(all_edges)
-        else:
-            m = len(all_edges)
-            n_edges = int(m*edge_density)
-        edges = random.sample(all_edges, n_edges)
-    else:
-        edges = specified_edges
     # Create an empty dictionary to store the graph structure.
-    nbrs_dict = {v: [] for v in range(n)}
-    for edge in edges:
-        # Add edge
+    pa_dict = {v: [] for v in range(m)}
+    for edge in specified_edges:
         v1, v2 = edge
-        nbrs_dict[v2].append(v1)
-    return nbrs_dict
+        pa_dict[v2].append(v1)
+    return pa_dict
 
-
-def check_monomial(term, nbrs):
+def check_monomial(term, pas):
     """
-    Helper function that checks whether all factors in a monomial term correspond to neighbours in the causal graph
+    Helper function that checks whether all factors in a monomial term correspond to the parents in the causal graph
     :param term: monomial represented by a list
-    :param nbrs: list of vertices (neighbours for some vertex)
+    :param pas: list of parents for a given vertex
     :return:
     """
     vertices_in_monomial = np.nonzero(term)[0]
     for v in vertices_in_monomial:
-        if v not in nbrs:
+        if v not in pas:
             return False
     return True
 
-def generate_polynomial_relations(nbrs_dict, ordered_monomials, monomial_density = None, specified_coeffs = None, n_seed = None, ensure_constant = True):
+
+def monomial_string_to_array(monomial_str, m):
     """
-    :param nbrs_dict: a dictionary where the keys are vertices and values are the neighbouring vertices
-    :param ordered_monomials: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
-    n_monomials-1) and the value is the corresponding monomial, represented by a list.
-    :param monomial_density:
-    :param specified_coeffs:
-    :param n_seed:
-    :param ensure_constant:
-    :return:
-    causal_params: a two-layered dictionary where the key i represents dx_i/dt for variable x_i and the value is another
-    dictionary, which captures all polynomial terms for dx_i/dt. The keys of this dictionary are the coefficients and
-    the values are the corresponding terms (represented as n-arrays)
+    Convert a monomial string to the corresponding array
+    :param monomial_str: String representation of a monomial, e.g., '5x_0x_1'
+    :param n: Number of causal variables
+    :return: Tuple representation of the monomial (coefficient, array)
     """
-    if n_seed is not None:
-        random.seed(n_seed)
-    n = len(nbrs_dict.keys())
-    all_monomials = list(ordered_monomials.values())
+    # Find the first occurrence of 'x_'
+    index_x = monomial_str.find('x_')
+
+    # Extracting the coefficient part
+    coefficient_str = monomial_str[:index_x] if index_x >= 0 else monomial_str
+
+    # Extracting the monomial part
+    monomial_part = monomial_str[index_x:] if index_x >= 0 else ''
+
+    # Convert coefficient to float
+    if coefficient_str == '-':
+        coefficient = -1.0
+    elif coefficient_str is None:
+        coefficient = 1.0
+    else:
+        coefficient = float(coefficient_str)
+
+    # Creating the array representation
+    monomial_array = [0] * m
+    i = 0
+    while i < len(monomial_part):
+        if monomial_part[i] == 'x':
+            i += 2  # Skip 'x_'
+            digit = int(monomial_part[i])
+            assert digit < m, "included variable is outside specified range"
+            if i + 1 < len(monomial_part):
+                if monomial_part[i+1] == '^':
+                    power = int(monomial_part[i+2])
+                else:
+                    power = 1
+            else:
+                power = 1
+            # print(f'power for x_{digit}: {power}')
+            monomial_array[digit] = power  # Adjust index to match 0-based indexing
+        else:
+            i += 1
+
+    return coefficient, monomial_array
+
+
+def parse_polynomial_strings(list_poly_strings, pa_dict):
+    '''
+    :param list_poly_strings: list of m poly strings (ex. of string: "x_1^2x_3 + x_2")
+    :param pa_dict: a dictionary where the keys are vertices (int) and values are its parent vertices (int)
+    :return: causal_params: a dictionary where the keys are vertices and values are list of tuples (coeff, monomial)
+    corresponding to the terms associated to dx_i/dt
+    '''
     causal_params = {}
-    # iterate over each vertex in causal graph
-    for i in range(n):
-        nbrs = nbrs_dict[i]
-        # select the terms in the polynomial for dx_i/dt based on nbrs of i in causal graph
-        valid_monomials_i = list(filter(lambda term: check_monomial(term, nbrs), all_monomials))
-        if monomial_density is not None:
-            # drop a proportion of monomials if applicable
-            monomials_i = random.sample(valid_monomials_i, int(monomial_density*len(valid_monomials_i)))
-            n_monomials_i = len(monomials_i)
-        else:
-            monomials_i = valid_monomials_i
-            n_monomials_i = len(valid_monomials_i)
-        if specified_coeffs is None:
-            # sample coefficients for each monomial
-            coefficients = [random.uniform(-5, 5) for _ in range(n_monomials_i)]
-            causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials_i)}
-        else:
-            assert len(specified_coeffs[i]) == len(all_monomials), f"the number of specified coefficients {len(specified_coeffs)}" \
-                                                              f"does not match the number of monomials {len(all_monomials)}"
-            coefficients = specified_coeffs[i]
-            causal_params[i] = {coeff: term for coeff, term in zip(coefficients, monomials_i)}
+    assert len(list_poly_strings) == len(pa_dict), "number of variables is not consistent between list_poly_strings and pa_dict"
+    m = len(list_poly_strings)
+    for i in range(m):
+        coefficients_i = []
+        monomials_i = []
+        pas = pa_dict[i]  # extract the parents of the current vertex x_i
+        poly_string = list_poly_strings[i]  # extract the polynomial string associated to dx_i/dt
+        monomial_strings = re.split(r'\s*\+\s*', poly_string)  # extract the individual monomials
+        monomial_strings = [term.strip() for term in monomial_strings]  # remove white space
+        for monomial_string in monomial_strings:
+            coefficient, monomial_array = monomial_string_to_array(monomial_string, m)
+            if check_monomial(monomial_array, pas):
+                coefficients_i.append(coefficient)
+                monomials_i.append(monomial_array)
+        causal_params[i] = [(coeff, monomial) for coeff, monomial in zip(coefficients_i, monomials_i)]
     return causal_params
 
-
-def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measurement_noise_scale = 0, n_series = 1, zero_init=True):
+def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
+                           zero_init=True):
     """
     :param causal_params:
     :param t_min:
@@ -134,15 +146,15 @@ def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measuremen
     n = len(causal_params.keys())
     X = np.zeros((n_steps, n))
     # create noise time series
-    W = None
-    E = None
+    W = None  # driving noise
+    E = None  # measurement noise
     if driving_noise_scale > 0:
         W = []
         for i in range(n):
             # Simulate Brownian motion noise for each variable x_i
             W_i = []
             for step in range(1, n_steps):
-                W_i.append(np.random.randn() * driving_noise_scale* np.sqrt(t[step]-t[step-1]))
+                W_i.append(np.random.randn() * driving_noise_scale * np.sqrt(t[step] - t[step - 1]))
             W.append(W_i)
     if measurement_noise_scale > 0:
         E = []
@@ -161,8 +173,9 @@ def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measuremen
     # Iterate over each time step
     for step in range(1, n_steps):
         delta_t = t[step] - t[step - 1]
-        # Iterate over each variable (i)
+        # Iterate over each variable x_i
         for i in range(n):
+            # extract monomials for variable x_i
             polynomial_dict = causal_params[i]
             # Initialize the polynomial value
             polynomial_value = 0
@@ -176,7 +189,7 @@ def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measuremen
                 polynomial_value += monomial_value
             # Update the variable's value for the current time step
             if driving_noise_scale > 0:
-                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step-1]
+                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step - 1]
             else:
                 X[step, i] = X[step - 1, i] + polynomial_value * delta_t
     if measurement_noise_scale > 0:
@@ -185,7 +198,9 @@ def generate_temporal_data(causal_params, t, driving_noise_scale = 0, measuremen
                 X[step, i] += E[i][step]
     return X
 
-def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False, n_series=1):
+
+def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False,
+                                    n_series=1):
     """
     :param n: Number of causal variables
     :param temporal_functions: list of functions where ith function determines variable i
@@ -238,7 +253,6 @@ def plot_time_series(t, X, n, causal_params=None):
             # Define the text box properties
             textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
 
-
             # Create a multiline text box
             plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
 
@@ -253,7 +267,6 @@ def plot_time_series(t, X, n, causal_params=None):
     # Show the plot
     plt.grid()
     plt.show()
-
 
 
 def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
@@ -273,9 +286,11 @@ def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
     # Plot each variable for the original data (X)
     for i in range(n):
         color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
-        plt.plot(t, X_list[0][:, i], label=f'{variable_names[i]} ({labels[0]})', linestyle='-', color=color)
-        plt.plot(t, X_list[1][:, i], linestyle='--', label=f'{variable_names[i]} ({labels[1]})', color=color)
-        plt.plot(t, X_list[2][:, i], linestyle='-.', marker='^', label=f'{variable_names[i]} ({labels[2]})', color=color)
+        lines = ["-", "--", "-.", ":"]
+        linecycler = cycle(lines)
+        for j in range(len(X_list)):
+            plt.plot(t, X_list[j][:, i], label=f'{variable_names[i]} ({labels[j]})', linestyle=next(linecycler),
+                     color=color)
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
             terms = causal_params[i].items()
@@ -303,19 +318,14 @@ def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
     plt.grid()
     plt.show()
 
-# Example usage:
-t = np.linspace(0, 1, 100)
-X_original = np.random.rand(100, 3)  # Replace with your actual data
-X_noisy = np.random.rand(100, 3)  # Replace with your actual data
-X_recovered = np.random.rand(100, 3)  # Replace with your actual data
-
 
 '''
 Helper functions for converting terms (as n-arrays) into strings
 '''
 
+
 # Function to convert term values into a sum representation
-def rhs_as_sum(terms, latex = True):
+def rhs_as_sum(terms, latex=True):
     term_strings = []
     for coeff, term in terms:
         if all(term[j] == 0 for j in range(len(term))):
@@ -325,7 +335,7 @@ def rhs_as_sum(terms, latex = True):
             term_string = ''
             for j in range(len(term)):
                 if term[j] > 0:
-                    term_string += get_termstring(term, latex)#f'$x_{{{j}}}^{{{term[j]}}}$'
+                    term_string += get_termstring(term, latex)  # f'$x_{{{j}}}^{{{term[j]}}}$'
             term_strings.append(coeff_string + term_string)
     if len(terms) > 0:
         polynomial_str = ' + '.join(term_strings)
@@ -333,7 +343,8 @@ def rhs_as_sum(terms, latex = True):
     else:
         return '0'
 
-def get_termstring(term, latex = False):
+
+def get_termstring(term, latex=False):
     term_string = ''
     for j in range(len(term)):
         if term[j] > 0:
@@ -345,6 +356,7 @@ def get_termstring(term, latex = False):
     #     term_string += '1'
     return term_string
 
+
 def print_causal_relationships(causal_params):
     n = len(causal_params.keys())
     for i in range(n):
@@ -354,7 +366,19 @@ def print_causal_relationships(causal_params):
             causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
         print(causal_str)
 
-#
+
+if __name__ == '__main__':
+    # coeff, monomial_array = monomial_string_to_array('-1', 2)
+    # print(coeff)
+    pa_dict = generate_causal_graph(5, [(0,0), (1, 0), (4,0), (2,2), (2,3), (1,4)])
+    list_poly_strings = ['3x_0^3x_1^2x_4+-x_0+2', '5', '4x_2', '2x_2+3', '3x_1+-1']
+    i = 0
+    for p in list_poly_strings:
+        print(f'dx_{i}/dt= {p}')
+        i += 1
+    causal_params = parse_polynomial_strings(list_poly_strings, pa_dict)
+    print(causal_params)
+
 # # Function to scale variables to prevent large jumps
 # def scale_variables(X, scaling_factors):
 #     return X / scaling_factors
@@ -390,3 +414,45 @@ def print_causal_relationships(causal_params):
 #         if reinitialization_attempts == max_reinitialization_attempts:
 #             print("Warning: Maximum reinitialization attempts reached.")
 #     return X
+
+# def generate_polynomial_relations(pa_dict, ordered_monomials, monomial_density=None, specified_coeffs=None, n_seed=None,
+#                                   ensure_constant=True):
+#     """
+#     :param pa_dict: a dictionary where the keys are vertices and values are its parent vertices
+#     :param ordered_monomials: a dictionary that orders each monomial of degree 0 to p. The keys represent the index (0, 1, ...
+#     n_monomials-1) and the value is the corresponding monomial, represented by a list.
+#     :param monomial_density:
+#     :param specified_coeffs:
+#     :param n_seed:
+#     :param ensure_constant:
+#     :return: causal_params: a dictionary where the keys are vertices and values are list of tuples (coeff, monomial)
+#     corresponding to the terms associated to dx_i/dt
+#     """
+#     if n_seed is not None:
+#         random.seed(n_seed)
+#     n = len(pa_dict.keys())
+#     all_monomials = list(ordered_monomials.values())
+#     causal_params = {}
+#     # iterate over each vertex in causal graph
+#     for i in range(n):
+#         pas = pa_dict[i]
+#         # select the terms in the polynomial for dx_i/dt based on nbrs of i in causal graph
+#         valid_monomials_i = list(filter(lambda term: check_monomial(term, pas), all_monomials))
+#         if monomial_density is not None:
+#             # drop a proportion of monomials if applicable
+#             monomials_i = random.sample(valid_monomials_i, int(monomial_density * len(valid_monomials_i)))
+#             n_monomials_i = len(monomials_i)
+#         else:
+#             monomials_i = valid_monomials_i
+#             n_monomials_i = len(valid_monomials_i)
+#         if specified_coeffs is None:
+#             # sample coefficients for each monomial
+#             coefficients = [random.uniform(-1, 1) for _ in range(n_monomials_i)]
+#             causal_params[i] = [(coeff, term) for coeff, term in zip(coefficients, monomials_i)]
+#         else:
+#             assert len(specified_coeffs[i]) == len(
+#                 all_monomials), f"the number of specified coefficients {len(specified_coeffs)}" \
+#                                 f"does not match the number of monomials {len(all_monomials)}"
+#             coefficients = specified_coeffs[i]
+#             causal_params[i] = [(coeff, term) for coeff, term in zip(coefficients, monomials_i)]
+#     return causal_params
