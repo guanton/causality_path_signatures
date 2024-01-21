@@ -4,6 +4,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import re
+import pandas as pd
 matplotlib.use('TkAgg')
 
 
@@ -63,7 +64,7 @@ def monomial_string_to_array(monomial_str, m):
     """
     Convert a monomial string to the corresponding array
     :param monomial_str: String representation of a monomial, e.g., '5x_0x_1'
-    :param n: Number of causal variables
+    :param m: Number of causal variables
     :return: Tuple representation of the monomial (coefficient, array)
     """
     # Find the first occurrence of 'x_'
@@ -131,8 +132,59 @@ def parse_polynomial_strings(list_poly_strings, pa_dict):
         causal_params[i] = [(coeff, monomial) for coeff, monomial in zip(coefficients_i, monomials_i)]
     return causal_params
 
+def initialize_time_series(X, t, m, n_series = 1, zero_init = True, n_seed = 0):
+    '''
+    :param X:
+    :param t:
+    :return:
+    '''
+    if n_seed is not None:
+        random.seed(n_seed)
+    # set initial values
+    for i in range(m):
+        for copy in range(n_series):
+            if zero_init:
+                X.loc[t[0], (i, copy)] = 0
+            else:
+                X.loc[t[0], (i, copy)] = random.uniform(-1, 1)
+    return X
+
+
+def initialize_noise_series(driving_noise_scale, measurement_noise_scale, m, n_series, t, n_seed=0):
+    W = pd.DataFrame(index=t)
+    E = pd.DataFrame(index=t)
+
+    if n_seed is not None:
+        np.random.seed(n_seed)
+
+    n_steps = len(t) - 1
+    n_meas = len(t)
+    if driving_noise_scale > 0:
+        # Initialize a multi-index DataFrame for W
+        mi_W = pd.MultiIndex.from_product([range(m), range(n_series)], names=['variable', 'copy'])
+        W = pd.DataFrame(index=t, columns=mi_W)
+
+        # Simulate Brownian motion noise for each variable x_i and copy
+        for i in range(m):
+            for copy in range(n_series):
+                W_i_copy = np.random.randn(n_steps) * driving_noise_scale * np.sqrt(np.diff(t))
+                W.loc[:, (i, copy)] = np.insert(W_i_copy, 0, 0)
+
+    if measurement_noise_scale > 0:
+        # Initialize a multi-index DataFrame for E
+        mi_E = pd.MultiIndex.from_product([range(m), range(n_series)], names=['variable', 'copy'])
+        E = pd.DataFrame(index=t, columns=mi_E)
+
+        # Simulate measurement noise for each variable x_i and copy
+        for i in range(m):
+            for copy in range(n_series):
+                E_i_copy = np.random.randn(n_meas) * measurement_noise_scale
+                E.loc[:, (i, copy)] = E_i_copy
+
+    return W, E
+
 def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
-                           zero_init=True):
+                           zero_init=True, n_seed = 0):
     """
     :param causal_params:
     :param t_min:
@@ -143,91 +195,75 @@ def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_
     :return:
     """
     n_steps = len(t)
-    n = len(causal_params.keys())
-    X = np.zeros((n_steps, n))
+    m = len(causal_params.keys())
+    mi = pd.MultiIndex.from_product([range(m), range(n_series)], names=['variable', 'copy'])
+    X = pd.DataFrame(index=t, columns=mi)
     # create noise time series
-    W = None  # driving noise
-    E = None  # measurement noise
-    if driving_noise_scale > 0:
-        W = []
-        for i in range(n):
-            # Simulate Brownian motion noise for each variable x_i
-            W_i = []
-            for step in range(1, n_steps):
-                W_i.append(np.random.randn() * driving_noise_scale * np.sqrt(t[step] - t[step - 1]))
-            W.append(W_i)
-    if measurement_noise_scale > 0:
-        E = []
-        for i in range(n):
-            E_i = []
-            for step in range(0, n_steps):
-                E_i.append(np.random.randn() * measurement_noise_scale)  # standard normal noise
-            E.append(E_i)
-    # set initial values
-    if zero_init:
-        for i in range(n):
-            X[0, i] = 0
-    else:
-        for i in range(n):
-            X[0, i] = random.uniform(-1, 1)
+    W, E = initialize_noise_series(driving_noise_scale, measurement_noise_scale, m, n_series, t, n_seed)
+    print("W:")
+    print(W.head())
+    # Specify the variable and copy you want to plot
+    variable_to_plot = 0
+    copy_to_plot = 0
+
+    # Extract the corresponding Brownian motion noise for the specified variable and copy
+    W_to_plot = W.loc[:, (variable_to_plot, copy_to_plot)].to_numpy()
+
+    # Plot the Brownian motion noise
+    plt.plot(t, W_to_plot, label=f'Variable {variable_to_plot}, Copy {copy_to_plot}')
+    plt.xlabel('Time')
+    plt.ylabel('Brownian Motion Noise')
+    plt.title(f'Brownian Motion Noise for Variable {variable_to_plot}, Copy {copy_to_plot}')
+    plt.legend()
+    plt.show()
+
+
+    print("\nE:")
+    print(E.head())
+    # Specify the variable and copy you want to plot
+    variable_to_plot = 0
+    copy_to_plot = 0
+
+    # Extract the corresponding Brownian motion noise for the specified variable and copy
+    E_to_plot = E.loc[:, (variable_to_plot, copy_to_plot)].to_numpy()
+
+    # Plot the Brownian motion noise
+    plt.plot(t, E_to_plot, label=f'Variable {variable_to_plot}, Copy {copy_to_plot}')
+    plt.xlabel('Time')
+    plt.ylabel('Measurement Noise')
+    plt.title(f'Measurement Noise for Variable {variable_to_plot}, Copy {copy_to_plot}')
+    plt.legend()
+    plt.show()
+    # initialize first values for time series
+    X = initialize_time_series(X, t, m, n_series, zero_init, n_seed)
+    return X
     # Iterate over each time step
-    for step in range(1, n_steps):
-        delta_t = t[step] - t[step - 1]
-        # Iterate over each variable x_i
-        for i in range(n):
-            # extract monomials for variable x_i
-            polynomial_dict = causal_params[i]
-            # Initialize the polynomial value
-            polynomial_value = 0
-            # Iterate over the coefficients and degrees of monomials
-            for coefficient, monomial in polynomial_dict.items():
-                monomial_value = coefficient
-                relevant_variables = [v for v in range(n) if monomial[v] != 0]
-                degrees = [monomial[v] for v in relevant_variables]
-                for v, degree in zip(relevant_variables, degrees):
-                    monomial_value *= X[step - 1, v] ** degree
-                polynomial_value += monomial_value
-            # Update the variable's value for the current time step
-            if driving_noise_scale > 0:
-                X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step - 1]
-            else:
-                X[step, i] = X[step - 1, i] + polynomial_value * delta_t
-    if measurement_noise_scale > 0:
-        for i in range(n):
-            for step in range(n_steps):
-                X[step, i] += E[i][step]
-    return X
-
-
-def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False,
-                                    n_series=1):
-    """
-    :param n: Number of causal variables
-    :param temporal_functions: list of functions where ith function determines variable i
-    :param t_min: Minimum time
-    :param t_max: Maximum time
-    :param n_steps: Number of time steps
-    :param noise_addition: Whether to add noise
-    :param n_series: Number of series to generate
-    :return: Generated time series data
-    """
-    assert n == len(temporal_functions), "number of variables does not match number of functions"
-    t = np.linspace(t_min, t_max, n_steps)
-    X = np.zeros((n_steps, n))
-    # set initial values
-    if noise_addition:
-        W = []
-        for i in range(n):
-            X[0, i] = random.uniform(-1, 1)
-            # Simulate Brownian motion (W(s))
-            W.append(np.sqrt(t[1] - t[0]) * np.random.randn(n_steps))
-    for step in range(n_steps):
-        for i in range(n):
-            # Calculate the value for each x_i(t) based on functions
-            X[step, i] = temporal_functions[i](t[step])
-            if noise_addition:
-                X[step, i] += W[i][step]
-    return X
+    # for step in range(1, n_steps):
+    #     delta_t = t[step] - t[step - 1]
+    #     # Iterate over each variable x_i
+    #     for i in range(m):
+    #         # extract monomials for variable x_i
+    #         polynomial_dict = causal_params[i]
+    #         # Initialize the polynomial value
+    #         polynomial_value = 0
+    #         # Iterate over the coefficients and degrees of monomials
+    #         for coefficient, monomial in polynomial_dict.items():
+    #             monomial_value = coefficient
+    #             relevant_variables = [v for v in range(m) if monomial[v] != 0]
+    #             degrees = [monomial[v] for v in relevant_variables]
+    #             for v, degree in zip(relevant_variables, degrees):
+    #                 monomial_value *= X[step - 1, v] ** degree
+    #             polynomial_value += monomial_value
+    #         # Update the variable's value for the current time step
+    #         if driving_noise_scale > 0:
+    #             X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step - 1]
+    #         else:
+    #             X[step, i] = X[step - 1, i] + polynomial_value * delta_t
+    # if measurement_noise_scale > 0:
+    #     for i in range(m):
+    #         for step in range(n_steps):
+    #             X[step, i] += E[i][step]
+    # return X
 
 
 def plot_time_series(t, X, n, causal_params=None):
@@ -378,6 +414,10 @@ if __name__ == '__main__':
         i += 1
     causal_params = parse_polynomial_strings(list_poly_strings, pa_dict)
     print(causal_params)
+    t = np.linspace(0, 1, 100)
+    X = generate_temporal_data(causal_params, t, driving_noise_scale=0.1, measurement_noise_scale=1, n_series=2,
+                           zero_init=False, n_seed=0)
+    print('x_1:', X.loc[0, (0, 0)])
 
 # # Function to scale variables to prevent large jumps
 # def scale_variables(X, scaling_factors):
@@ -456,3 +496,33 @@ if __name__ == '__main__':
 #             coefficients = specified_coeffs[i]
 #             causal_params[i] = [(coeff, term) for coeff, term in zip(coefficients, monomials_i)]
 #     return causal_params
+
+# def generate_temporal_data_from_fns(n, temporal_functions, t_min=0, t_max=1, n_steps=100, noise_addition=False,
+#                                     n_series=1):
+#     """
+#     :param n: Number of causal variables
+#     :param temporal_functions: list of functions where ith function determines variable i
+#     :param t_min: Minimum time
+#     :param t_max: Maximum time
+#     :param n_steps: Number of time steps
+#     :param noise_addition: Whether to add noise
+#     :param n_series: Number of series to generate
+#     :return: Generated time series data
+#     """
+#     assert n == len(temporal_functions), "number of variables does not match number of functions"
+#     t = np.linspace(t_min, t_max, n_steps)
+#     X = np.zeros((n_steps, n))
+#     # set initial values
+#     if noise_addition:
+#         W = []
+#         for i in range(n):
+#             X[0, i] = random.uniform(-1, 1)
+#             # Simulate Brownian motion (W(s))
+#             W.append(np.sqrt(t[1] - t[0]) * np.random.randn(n_steps))
+#     for step in range(n_steps):
+#         for i in range(n):
+#             # Calculate the value for each x_i(t) based on functions
+#             X[step, i] = temporal_functions[i](t[step])
+#             if noise_addition:
+#                 X[step, i] += W[i][step]
+#     return X
