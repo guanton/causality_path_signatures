@@ -183,6 +183,29 @@ def initialize_noise_series(driving_noise_scale, measurement_noise_scale, m, n_s
 
     return W, E
 
+
+def calculate_polynomial_value(X, coeff_monomials, t_value, copy):
+    """
+    Calculate the polynomial value for a variable based on its coefficients and monomials.
+
+    Parameters:
+    - coeff_monomials: List of tuples, where each tuple contains a float coefficient and a monomial (in array form).
+    - prev_values: Pandas Series representing the previous values of variables.
+
+    Returns:
+    - Polynomial value for the current time step.
+    """
+    polynomial_value = 0
+    m = len(coeff_monomials[0][1])
+    for coeff, monomial in coeff_monomials:
+        monomial_value = coeff
+        relevant_variables = [v for v in range(m) if monomial[v] != 0]
+        degrees = [monomial[v] for v in relevant_variables]
+        for v, degree in zip(relevant_variables, degrees):
+            monomial_value *= X.loc[t_value, (v, copy)] ** degree
+        polynomial_value += monomial_value
+    return polynomial_value
+
 def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
                            zero_init=True, n_seed = 0):
     """
@@ -198,93 +221,56 @@ def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_
     m = len(causal_params.keys())
     mi = pd.MultiIndex.from_product([range(m), range(n_series)], names=['variable', 'copy'])
     X = pd.DataFrame(index=t, columns=mi)
+    X = initialize_time_series(X, t, m, n_series=n_series, zero_init=zero_init, n_seed=0)
     # create noise time series
     W, E = initialize_noise_series(driving_noise_scale, measurement_noise_scale, m, n_series, t, n_seed)
-    print("W:")
-    print(W.head())
-    # Specify the variable and copy you want to plot
-    variable_to_plot = 0
-    copy_to_plot = 0
 
-    # Extract the corresponding Brownian motion noise for the specified variable and copy
-    W_to_plot = W.loc[:, (variable_to_plot, copy_to_plot)].to_numpy()
+    for step in range(1, n_steps):
+        delta_t = t[step] - t[step - 1]
+        # Iterate over each variable x_i
+        for i in range(m):
+            # Extract coefficients and monomials for variable x_i
+            coeff_monomials = causal_params[i]
 
-    # Plot the Brownian motion noise
-    plt.plot(t, W_to_plot, label=f'Variable {variable_to_plot}, Copy {copy_to_plot}')
-    plt.xlabel('Time')
-    plt.ylabel('Brownian Motion Noise')
-    plt.title(f'Brownian Motion Noise for Variable {variable_to_plot}, Copy {copy_to_plot}')
-    plt.legend()
-    plt.show()
+            # Update the variable's value for each copy at the current time step
+            for copy in range(n_series):
+                # Calculate the polynomial value for the current time step
+                polynomial_value = calculate_polynomial_value(X, coeff_monomials, t[step-1], copy)
+                X.loc[t[step], (i, copy)] = X.loc[t[step - 1], (i, copy)] + polynomial_value * delta_t
+                if driving_noise_scale > 0:
+                    X.loc[t[step], (i, copy)] += W.loc[t[step - 1], (i, copy)]
 
+    if measurement_noise_scale > 0:
+        X += E.values
 
-    print("\nE:")
-    print(E.head())
-    # Specify the variable and copy you want to plot
-    variable_to_plot = 0
-    copy_to_plot = 0
-
-    # Extract the corresponding Brownian motion noise for the specified variable and copy
-    E_to_plot = E.loc[:, (variable_to_plot, copy_to_plot)].to_numpy()
-
-    # Plot the Brownian motion noise
-    plt.plot(t, E_to_plot, label=f'Variable {variable_to_plot}, Copy {copy_to_plot}')
-    plt.xlabel('Time')
-    plt.ylabel('Measurement Noise')
-    plt.title(f'Measurement Noise for Variable {variable_to_plot}, Copy {copy_to_plot}')
-    plt.legend()
-    plt.show()
-    # initialize first values for time series
-    X = initialize_time_series(X, t, m, n_series, zero_init, n_seed)
     return X
-    # Iterate over each time step
-    # for step in range(1, n_steps):
-    #     delta_t = t[step] - t[step - 1]
-    #     # Iterate over each variable x_i
-    #     for i in range(m):
-    #         # extract monomials for variable x_i
-    #         polynomial_dict = causal_params[i]
-    #         # Initialize the polynomial value
-    #         polynomial_value = 0
-    #         # Iterate over the coefficients and degrees of monomials
-    #         for coefficient, monomial in polynomial_dict.items():
-    #             monomial_value = coefficient
-    #             relevant_variables = [v for v in range(m) if monomial[v] != 0]
-    #             degrees = [monomial[v] for v in relevant_variables]
-    #             for v, degree in zip(relevant_variables, degrees):
-    #                 monomial_value *= X[step - 1, v] ** degree
-    #             polynomial_value += monomial_value
-    #         # Update the variable's value for the current time step
-    #         if driving_noise_scale > 0:
-    #             X[step, i] = X[step - 1, i] + polynomial_value * delta_t + W[i][step - 1]
-    #         else:
-    #             X[step, i] = X[step - 1, i] + polynomial_value * delta_t
-    # if measurement_noise_scale > 0:
-    #     for i in range(m):
-    #         for step in range(n_steps):
-    #             X[step, i] += E[i][step]
-    # return X
 
-
-def plot_time_series(t, X, n, causal_params=None):
+def plot_time_series(X, m, n_series, causal_params=None):
     # Extract the time series data for each variable
-    variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
+    variable_names = [f'x{i}' for i in range(0, m)]  # Variable names x1, x2, ..., xn
 
     # Plot each variable
     plt.figure(figsize=(10, 6))
+    time_values = X.index.to_numpy()  # Convert Index to NumPy array
 
-    for i in range(n):
+    for i in range(m):
+        color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
+        lines = ["-", "--", "-.", ":"]
+        linecycler = cycle(lines)
         # Plot time series data for ith variable
-        plt.plot(t, X[:, i], label=variable_names[i])
+        for copy in range(n_series):
+            series_to_plot = X.loc[:, (i, copy)].to_numpy()
+            plt.plot(time_values, series_to_plot, label=f'{variable_names[i]} - Copy {copy}', linestyle=next(linecycler),
+                     color=color)
 
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
-            terms = causal_params[i].items()
+            terms = causal_params[i]
             causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
 
             # Calculate the position for the text box near the curve
-            x_position = t[-1] - 0.1  # Slightly to the left of the end of the curve
-            y_position = X[-1, i]
+            x_position = time_values[-1] - 0.1  # Slightly to the left of the end of the curve
+            y_position = X.loc[X.index[-1], (i, 0)]
 
             # Define the text box properties
             textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
@@ -305,22 +291,23 @@ def plot_time_series(t, X, n, causal_params=None):
     plt.show()
 
 
-def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
+
+def plot_time_series_comp(X_list, labels, m, causal_params=None):
     '''
     :param t:
     :param X_list: [X given no noise, observed noisy X, recovered X using polynomial relations from noisy)
     :param labels:
-    :param n:
+    :param m:
     :param causal_params:
     :return:
     '''
     # Extract the time series data for each variable
-    variable_names = [f'x{i}' for i in range(0, n)]  # Variable names x1, x2, ..., xn
+    variable_names = [f'x{i}' for i in range(0, m)]  # Variable names x1, x2, ..., xn
 
     # Plot each variable for the original data (X)
     plt.figure(figsize=(12, 6))
     # Plot each variable for the original data (X)
-    for i in range(n):
+    for i in range(m):
         color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
         lines = ["-", "--", "-.", ":"]
         linecycler = cycle(lines)
@@ -329,7 +316,7 @@ def plot_time_series_comp(t, X_list, labels, n, causal_params=None):
                      color=color)
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
-            terms = causal_params[i].items()
+            terms = causal_params[i]
             causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
 
             # Calculate the position for the text box near the curve
@@ -369,9 +356,7 @@ def rhs_as_sum(terms, latex=True):
         else:
             coeff_string = f'{coeff:.2f}'
             term_string = ''
-            for j in range(len(term)):
-                if term[j] > 0:
-                    term_string += get_termstring(term, latex)  # f'$x_{{{j}}}^{{{term[j]}}}$'
+            term_string += get_termstring(term, latex)  # f'$x_{{{j}}}^{{{term[j]}}}$'
             term_strings.append(coeff_string + term_string)
     if len(terms) > 0:
         polynomial_str = ' + '.join(term_strings)
@@ -398,7 +383,7 @@ def print_causal_relationships(causal_params):
     for i in range(n):
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
-            terms = causal_params[i].items()
+            terms = causal_params[i]
             causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
         print(causal_str)
 
@@ -406,18 +391,23 @@ def print_causal_relationships(causal_params):
 if __name__ == '__main__':
     # coeff, monomial_array = monomial_string_to_array('-1', 2)
     # print(coeff)
-    pa_dict = generate_causal_graph(5, [(0,0), (1, 0), (4,0), (2,2), (2,3), (1,4)])
-    list_poly_strings = ['3x_0^3x_1^2x_4+-x_0+2', '5', '4x_2', '2x_2+3', '3x_1+-1']
+    m=2
+    n_series = 3
+    pa_dict = generate_causal_graph(m, [(0,0), (1, 0)])
+    list_poly_strings = ['3x_0x_1^2 + -7x_1 +5', '-0.2']
     i = 0
     for p in list_poly_strings:
         print(f'dx_{i}/dt= {p}')
         i += 1
     causal_params = parse_polynomial_strings(list_poly_strings, pa_dict)
     print(causal_params)
-    t = np.linspace(0, 1, 100)
-    X = generate_temporal_data(causal_params, t, driving_noise_scale=0.1, measurement_noise_scale=1, n_series=2,
-                           zero_init=False, n_seed=0)
-    print('x_1:', X.loc[0, (0, 0)])
+    t = np.linspace(0, 1, 500)
+    X = generate_temporal_data(causal_params, t, driving_noise_scale=0.1, measurement_noise_scale=0, n_series=n_series,
+                           zero_init=True, n_seed=0)
+    print(X.head())
+    print('x_1:', X.loc[t[50], (0, 0)])
+    plot_time_series(X, m, n_series, causal_params=causal_params)
+
 
 # # Function to scale variables to prevent large jumps
 # def scale_variables(X, scaling_factors):
