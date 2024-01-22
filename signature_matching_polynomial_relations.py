@@ -103,7 +103,6 @@ def compute_level_1_path(x_i, a, b):
     return path
 
 
-
 def compute_integral(X, f, i, b):
     '''
     :param X: time series data for all variables X_i

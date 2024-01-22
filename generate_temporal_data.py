@@ -241,9 +241,34 @@ def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_
                     X.loc[t[step], (i, copy)] += W.loc[t[step - 1], (i, copy)]
 
     if measurement_noise_scale > 0:
-        X += E.values
-
+            X += E.values
     return X
+
+def calculate_derivative_df(X, t):
+    derivative_df = pd.DataFrame(index=t)
+    delta_t = np.diff(t)  # Calculate time differences
+
+    for i in range(m):
+        for copy in range(n_series):
+            series_to_differentiate = X.loc[:, (i, copy)].to_numpy()
+
+            # Calculate derivative using finite differences
+            derivative_values = np.diff(series_to_differentiate) / delta_t
+            derivative_values = np.insert(derivative_values, 0, 0)  # Insert slope 0 for the first point
+
+            # Create a MultiIndex for derivative_df
+            mi = pd.MultiIndex.from_product([[i], [copy]], names=['variable', 'copy'])
+
+            # Adjust the length of derivative_values
+            derivative_values = derivative_values[:len(t)-1]
+
+            # Create a DataFrame with the correct structure
+            temp_df = pd.DataFrame(derivative_values, index=t[:-1], columns=mi)
+
+            # Concatenate temp_df with derivative_df
+            derivative_df = pd.concat([derivative_df, temp_df], axis=1)
+
+    return derivative_df
 
 def plot_time_series(X, m, n_series, causal_params=None):
     # Extract the time series data for each variable
@@ -292,7 +317,7 @@ def plot_time_series(X, m, n_series, causal_params=None):
 
 
 
-def plot_time_series_comp(X_list, labels, m, causal_params=None):
+def plot_time_series_comp(X_list, labels, m, n_series, causal_params=None):
     '''
     :param t:
     :param X_list: [X given no noise, observed noisy X, recovered X using polynomial relations from noisy)
@@ -303,7 +328,8 @@ def plot_time_series_comp(X_list, labels, m, causal_params=None):
     '''
     # Extract the time series data for each variable
     variable_names = [f'x{i}' for i in range(0, m)]  # Variable names x1, x2, ..., xn
-
+    X = X_list[0]
+    time_values = X.index.to_numpy()
     # Plot each variable for the original data (X)
     plt.figure(figsize=(12, 6))
     # Plot each variable for the original data (X)
@@ -312,16 +338,21 @@ def plot_time_series_comp(X_list, labels, m, causal_params=None):
         lines = ["-", "--", "-.", ":"]
         linecycler = cycle(lines)
         for j in range(len(X_list)):
-            plt.plot(t, X_list[j][:, i], label=f'{variable_names[i]} ({labels[j]})', linestyle=next(linecycler),
-                     color=color)
+            X = X_list[j]
+            for copy in range(n_series):
+                series_to_plot = X.loc[:, (i, copy)].to_numpy()
+                plt.plot(time_values, series_to_plot, label=f'{variable_names[i]} ({labels[j]}) - Copy {copy}',
+                         linestyle=next(linecycler),
+                         color=color)
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
             terms = causal_params[i]
             causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
 
             # Calculate the position for the text box near the curve
-            x_position = t[-1] - 0.1  # Slightly to the left of the end of the curve
-            y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
+            x_position = time_values[-1] - 0.1   # Slightly to the left of the end of the curve
+            y_position = X.loc[X.index[-1], (i, 0)]
+            # y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
 
             # Define the text box properties
             textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
@@ -345,7 +376,6 @@ def plot_time_series_comp(X_list, labels, m, causal_params=None):
 '''
 Helper functions for converting terms (as n-arrays) into strings
 '''
-
 
 # Function to convert term values into a sum representation
 def rhs_as_sum(terms, latex=True):
@@ -377,7 +407,6 @@ def get_termstring(term, latex=False):
     #     term_string += '1'
     return term_string
 
-
 def print_causal_relationships(causal_params):
     n = len(causal_params.keys())
     for i in range(n):
@@ -395,18 +424,20 @@ if __name__ == '__main__':
     n_series = 3
     pa_dict = generate_causal_graph(m, [(0,0), (1, 0)])
     list_poly_strings = ['3x_0x_1^2 + -7x_1 +5', '-0.2']
-    i = 0
-    for p in list_poly_strings:
-        print(f'dx_{i}/dt= {p}')
-        i += 1
+    # i = 0
+    # for p in list_poly_strings:
+    #     print(f'dx_{i}/dt= {p}')
+    #     i += 1
     causal_params = parse_polynomial_strings(list_poly_strings, pa_dict)
-    print(causal_params)
+    print_causal_relationships(causal_params)
     t = np.linspace(0, 1, 500)
     X = generate_temporal_data(causal_params, t, driving_noise_scale=0.1, measurement_noise_scale=0, n_series=n_series,
                            zero_init=True, n_seed=0)
     print(X.head())
-    print('x_1:', X.loc[t[50], (0, 0)])
-    plot_time_series(X, m, n_series, causal_params=causal_params)
+    derivative_df = calculate_derivative_df(X, t)
+
+    print(derivative_df.head())
+    plot_time_series_comp([X], ['raw'], m, n_series, causal_params=causal_params)
 
 
 # # Function to scale variables to prevent large jumps
