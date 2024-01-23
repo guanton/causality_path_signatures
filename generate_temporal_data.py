@@ -230,7 +230,6 @@ def generate_temporal_data(causal_params, m, t, driving_noise_scale=0, measureme
         for i in range(m):
             # Extract coefficients and monomials for variable x_i
             coeff_monomials = causal_params[i]
-
             # Update the variable's value for each copy at the current time step
             for copy in range(n_series):
                 # Calculate the polynomial value for the current time step
@@ -340,11 +339,10 @@ def plot_time_series_comp(X_list, labels, m, n_series, causal_params=None):
         linecycler = cycle(lines)
         for j in range(len(X_list)):
             X = X_list[j]
-            for copy in range(n_series):
-                series_to_plot = X.loc[:, (i, copy)].to_numpy()
-                plt.plot(time_values, series_to_plot, label=f'{variable_names[i]} ({labels[j]}) - Copy {copy}',
-                         linestyle=next(linecycler),
-                         color=color)
+            series_to_plot =  X.loc[:, (i, slice(None))].mean(axis=1).to_numpy()
+            plt.plot(time_values, series_to_plot, label=f'{variable_names[i]} ({labels[j]}) - mean over {n_series} copies',
+                     linestyle=next(linecycler),
+                     color=color)
         # Display causal relationships if available
         if causal_params is not None and i in causal_params:
             terms = causal_params[i]

@@ -58,7 +58,7 @@ def generate_multi_indices(l, k, n_params, m, n_seed=None):
     multi_indices = []
     for _ in range(k):
         multi_index = [l] # begin with the variable of interest
-        word_length = np.random.randint(0, m-1)
+        word_length = np.random.randint(m)
         # Append additional elements to the multi-index
         for _ in range(word_length):
             multi_index.append(np.random.randint(0, m))  # Adjust the upper bound as needed
@@ -186,7 +186,7 @@ def compute_b(X, m, l, derivatives_df, multi_indices, sub, copy):
 
 
 
-def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub, copy, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
+def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub, copies, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
     """
     :param X: time series data for all variables x_i
     :param n_monomials:  number of parameters to recover
@@ -202,8 +202,16 @@ def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub
     recovered_causal_params = {}
     n_params = len(ordered_monomials)
     for l in range(m):
-        b = compute_b(X, m, l, derivatives_df, multi_indices[l], sub, copy)
-        M = compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indices[l], sub, copy)
+        bs = []
+        Ms = []
+        for copy in copies:
+            b = compute_b(X, m, l, derivatives_df, multi_indices[l], sub, copy)
+            bs.append(b)
+            M = compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indices[l], sub, copy)
+            Ms.append(M)
+        # average over the n_series different copies
+        b = np.average(bs, axis=0)
+        M = np.average(Ms, axis=0)
         # compute b using the level 1 iterated integrals
         if solver == 'ridge':
             # Use Ridge regression with regularization
@@ -227,10 +235,10 @@ def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub
         elif solver == 'direct':
             params_i = np.linalg.solve(M, b)
             params_i = [x[0] for x in params_i]
-        recovered_causal_params[l] = {}
+        recovered_causal_params[l] = []
         for j in range(n_params):
             if abs(params_i[j]) > tol:
-                recovered_causal_params[l][params_i[j]]=ordered_monomials[j]
+                recovered_causal_params[l].append((params_i[j], ordered_monomials[j]))
         string = f'dx_{l}/dt= '
         for j in range(len(params_i)):
             if abs(params_i[j]) > tol:
