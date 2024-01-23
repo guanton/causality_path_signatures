@@ -184,7 +184,7 @@ def initialize_noise_series(driving_noise_scale, measurement_noise_scale, m, n_s
     return W, E
 
 
-def calculate_polynomial_value(X, coeff_monomials, t_value, copy):
+def calculate_polynomial_value(X, m, coeff_monomials, t_value, copy):
     """
     Calculate the polynomial value for a variable based on its coefficients and monomials.
 
@@ -196,7 +196,6 @@ def calculate_polynomial_value(X, coeff_monomials, t_value, copy):
     - Polynomial value for the current time step.
     """
     polynomial_value = 0
-    m = len(coeff_monomials[0][1])
     for coeff, monomial in coeff_monomials:
         monomial_value = coeff
         relevant_variables = [v for v in range(m) if monomial[v] != 0]
@@ -206,7 +205,7 @@ def calculate_polynomial_value(X, coeff_monomials, t_value, copy):
         polynomial_value += monomial_value
     return polynomial_value
 
-def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
+def generate_temporal_data(causal_params, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
                            zero_init=True, n_seed = 0):
     """
     :param causal_params:
@@ -235,7 +234,7 @@ def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_
             # Update the variable's value for each copy at the current time step
             for copy in range(n_series):
                 # Calculate the polynomial value for the current time step
-                polynomial_value = calculate_polynomial_value(X, coeff_monomials, t[step-1], copy)
+                polynomial_value = calculate_polynomial_value(X, m, coeff_monomials, t[step-1], copy)
                 X.loc[t[step], (i, copy)] = X.loc[t[step - 1], (i, copy)] + polynomial_value * delta_t
                 if driving_noise_scale > 0:
                     X.loc[t[step], (i, copy)] += W.loc[t[step - 1], (i, copy)]
@@ -244,10 +243,10 @@ def generate_temporal_data(causal_params, t, driving_noise_scale=0, measurement_
             X += E.values
     return X
 
-def calculate_derivative_df(X, t):
-    derivative_df = pd.DataFrame(index=t)
-    delta_t = np.diff(t)  # Calculate time differences
 
+def calculate_derivative_df(X, t, m, n_series):
+    delta_t = np.diff(t)  # Calculate time differences
+    df_list = []  # List to store individual DataFrames
     for i in range(m):
         for copy in range(n_series):
             series_to_differentiate = X.loc[:, (i, copy)].to_numpy()
@@ -259,16 +258,18 @@ def calculate_derivative_df(X, t):
             # Create a MultiIndex for derivative_df
             mi = pd.MultiIndex.from_product([[i], [copy]], names=['variable', 'copy'])
 
-            # Adjust the length of derivative_values
-            derivative_values = derivative_values[:len(t)-1]
-
             # Create a DataFrame with the correct structure
-            temp_df = pd.DataFrame(derivative_values, index=t[:-1], columns=mi)
+            temp_df = pd.DataFrame(derivative_values, index=t[:], columns=mi)
+            df_list.append(temp_df)
 
-            # Concatenate temp_df with derivative_df
-            derivative_df = pd.concat([derivative_df, temp_df], axis=1)
+    # Concatenate all DataFrames in the list
+    derivative_df = pd.concat(df_list, axis=1)
+
+    # Fill NaN values with 0
+    derivative_df = derivative_df.fillna(0)
 
     return derivative_df
+
 
 def plot_time_series(X, m, n_series, causal_params=None):
     # Extract the time series data for each variable
@@ -431,10 +432,10 @@ if __name__ == '__main__':
     causal_params = parse_polynomial_strings(list_poly_strings, pa_dict)
     print_causal_relationships(causal_params)
     t = np.linspace(0, 1, 500)
-    X = generate_temporal_data(causal_params, t, driving_noise_scale=0.1, measurement_noise_scale=0, n_series=n_series,
+    X = generate_temporal_data(causal_params, m, t, driving_noise_scale=0.1, measurement_noise_scale=0, n_series=n_series,
                            zero_init=True, n_seed=0)
     print(X.head())
-    derivative_df = calculate_derivative_df(X, t)
+    derivative_df = calculate_derivative_df(X, t, m, n_series)
 
     print(derivative_df.head())
     plot_time_series_comp([X], ['raw'], m, n_series, causal_params=causal_params)
