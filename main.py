@@ -58,20 +58,58 @@ def estimate_coefficients_sub(X, t, n, ordered_monomials, solver = 'direct', tol
     # create the necessary subintervals
     subintervals = generate_subintervals(t, sub_mode)
     sub_dict = create_subintervals_dict(subintervals, t)
-    M = compute_M(X, n_monomials, ordered_monomials, subintervals, t, n, level, driving_noise_scale=driving_noise_scale, sub_dict = sub_dict, sample_noise = sample_noise)
+    M = compute_M_subs(X, n_monomials, ordered_monomials, subintervals, t, n, level, driving_noise_scale=driving_noise_scale, sub_dict = sub_dict, sample_noise = sample_noise)
     print(f'Recovered relations from level {level} signature matching using {solver} solver with alpha = {alpha} and cutoff {tol}:')
-    recovered_causal_params = solve_parameters(X, t, n_monomials, subintervals, M, ordered_monomials, solver=solver, alpha = alpha, level = level)
+    recovered_causal_params = solve_parameters_sub(X, t, n_monomials, subintervals, M, ordered_monomials, solver=solver, alpha = alpha, level = level)
     return recovered_causal_params
+
+def estimate_coefficients_test(method, X, n, ordered_monomials, solver = 'direct', tol = 0.1, alpha = None, sub_mode = 'zeros',
+                          n_subs = None, sample_noise = True, level = 1, driving_noise_scale = 0.1, n_samples = 1):
+    '''
+    :param X: observed time series data
+    :param t: set of time indices
+    :param n: number of causal variables x_i
+    :param ordered_monomials: set of considered monomials for polynomial relationships
+    :param solver: 'lasso', 'ridge', 'direct', 'pseudo-inverse'
+    :param tol: cutoff parameter for reporting monomial coefficients
+    :param alpha: regularization parameter
+    :param sub_mode: 'all', 'random', 'zeros', 'adjacent'
+    :param n_subs: optional parameter to be used for 'random' subintervals
+    :param level: level of iterated integrals for signature matching
+    :return:
+    '''
+    t = X.index.to_numpy()
+    n_monomials = len(ordered_monomials)
+    # create the necessary subintervals
+    subintervals = generate_subintervals(t, sub_mode)
+    sub_dict = create_subintervals_dict(subintervals, t)
+    if method == 'integrals':
+        M = compute_M(X, n_monomials, ordered_monomials, subintervals, t, n, level, driving_noise_scale=driving_noise_scale, sub_dict = sub_dict, sample_noise = sample_noise)
+        print(
+            f'Recovered relations from randomized integral matching using {solver} solver with alpha = {alpha} and cutoff {tol}:')
+        recovered_causal_params = solve_parameters(X, t, n_monomials, subintervals, M, ordered_monomials, solver=solver,
+                                                   alpha=alpha, level=level)
+    elif method == 'subintervals':
+        X = convert_df_to_array(X)
+        M = compute_M_subs(X, n_monomials, ordered_monomials, subintervals, t, n, level, driving_noise_scale=driving_noise_scale, sub_dict = sub_dict, sample_noise=sample_noise)
+        print(
+        f'Recovered relations from difference matching using {solver} solver with alpha = {alpha} and cutoff {tol}:')
+        recovered_causal_params = solve_parameters(X, t, n_monomials, subintervals, M, ordered_monomials, solver=solver,
+                                               alpha=alpha, level=level)
+    else:
+        return 'invalid method'
+    return recovered_causal_params
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Choose parameters for creating the data
     m = 2 # number of causal variables
-    p = 3
+    p = 2
     n_steps = 100  # number of time points per variable
-    n_series = 10
+    n_series = 5
     specified_edges = [(0,0), (1,0)] # list of edges in the causal graph
-    list_poly_strings = ['5', '-0.2']
+    list_poly_strings = ['5x_1x_0 + 2', '-0.2']
     start_t = 0
     end_t = 1
     n_seed = 0
@@ -86,21 +124,36 @@ if __name__ == '__main__':
     X_, t, causal_params, ordered_monomials, derivative_df = generate_time_series(list_poly_strings, p, m, specified_edges, driving_noise_scale=driving_noise_scale, measurement_noise_scale=measurement_noise_scale, n_steps=n_steps, n_series = n_series, start_t=start_t, end_t=end_t, n_seed = n_seed )
     W = []
     # Choose parameters for solving coefficients
-    solver = 'lasso' # implement hierarchical lasso later
-    alpha = (m+p)/1000 # regularization
-    tol = 0.001
+    solver = 'lasso'
+    alpha = 0.0001
+    tol = 0.01
     n_subs = None
-    sub_mode = 'one'
+    method = 'integrals'
     # # Solve parameters from the original data
     # print('From the original noiseless data: ')
     # estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol, alpha = alpha, sub_mode = sub_mode, n_subs = n_subs)
     # Solve parameters from the noisy data
     print(f'From the noisy data: ')
-    k = len(ordered_monomials)
-    copies = np.arange(n_series).tolist()
-    recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed)
-    X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
-                           zero_init=True, n_seed = 0)
+    if method == 'integrals':
+        sub_mode = 'one'
+        k = len(ordered_monomials)
+        copies = np.arange(n_series).tolist()
+        recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed)
+        X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
+                               zero_init=True, n_seed = 0)
+    elif method == 'subs':
+        sub_mode = 'zeros'
+        n_series = 1
+        X_ = convert_df_to_array(X_)
+        level = 1
+        recovered_causal_params_ = estimate_coefficients_sub(X_, t, m, ordered_monomials, solver=solver, sample_noise=False,
+                                                         tol=tol, alpha=alpha,
+                                                         sub_mode=sub_mode, n_subs=n_subs, level=level)
+        X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0,
+                                              measurement_noise_scale=0, n_series=1,
+                                              zero_init=True, n_seed=0)
+        X_ = convert_array_to_df(X_, t, m)
+
     # Plot the time series data
     plot_time_series_comp([X_, X_recovered_], ['Original', 'Recovered'], m, n_series, causal_params)
 

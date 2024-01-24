@@ -58,6 +58,7 @@ def generate_multi_indices(l, k, n_params, m, n_seed=None):
     multi_indices = []
     for _ in range(k):
         multi_index = [l] # begin with the variable of interest
+        multi_indices.append(multi_index)
         word_length = np.random.randint(m)
         # Append additional elements to the multi-index
         for _ in range(word_length):
@@ -173,7 +174,10 @@ def compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indice
         assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
         for j in range(n_params):
             monomial = ordered_monomials[j]
-            M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub, monomial = monomial)
+            if j > 0:
+                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub, monomial = monomial)
+            else:
+                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub, monomial = None)
     return M
 
 
@@ -310,9 +314,49 @@ def compute_M_subs(X, n_params, ordered_monomials, subintervals, t, n, level, sa
                     M[(i+1)*len(subintervals) + k, j] = integral
     return M
 
+def convert_df_to_array(X):
+    """
+    Convert DataFrame X to a NumPy array.
+
+    Parameters:
+    - X: DataFrame with multi-level columns (variable, copy) and time indices
+
+    Returns:
+    - X_array: NumPy array with time indices as the first dimension and variables as the second dimension
+    """
+
+    # Assuming copy is fixed at 0
+    copy_value = 0
+
+    # Use .xs to cross-section the DataFrame
+    X_fixed_copy = X.xs(key=copy_value, axis=1, level='copy').to_numpy()
+
+    return X_fixed_copy
 
 
+def convert_array_to_df(X_array, t, m):
+    """
+    Convert NumPy array X_array to a DataFrame.
 
+    Parameters:
+    - X_array: NumPy array with time indices as the first dimension and variables as the second dimension
+    - t: Array of time indices
+    - m: Number of variables
+
+    Returns:
+    - X_df: DataFrame with multi-level columns (variable, copy) and time indices
+    """
+
+    # Assuming copy is fixed at 0
+    copy_values = [0]
+
+    # Create MultiIndex for columns
+    mi = pd.MultiIndex.from_product([range(m), copy_values], names=['variable', 'copy'])
+
+    # Create DataFrame
+    X_df = pd.DataFrame(X_array, index=t, columns=mi)
+
+    return X_df
 
 def solve_parameters_sub(X, t, n_monomials, subintervals, M, ordered_monomials, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
     """
@@ -340,7 +384,6 @@ def solve_parameters_sub(X, t, n_monomials, subintervals, M, ordered_monomials, 
             level_2_paths = compute_level_2_paths(X, i, n, t, subintervals = subintervals)
             merged_paths = np.concatenate([b, level_2_paths], axis=0)
             b = merged_paths
-        recovered_causal_params[i] = {}
         # compute b using the level 1 iterated integrals
         if solver == 'ridge':
             # Use Ridge regression with regularization
@@ -364,10 +407,10 @@ def solve_parameters_sub(X, t, n_monomials, subintervals, M, ordered_monomials, 
         elif solver == 'direct':
             params_i = np.linalg.solve(M, b)
             params_i = [x[0] for x in params_i]
-        recovered_causal_params[i] = {}
+        recovered_causal_params[i] = []
         for j in range(n_monomials):
             if abs(params_i[j]) > tol:
-                recovered_causal_params[i][params_i[j]]=ordered_monomials[j]
+                recovered_causal_params[i].append((params_i[j], ordered_monomials[j]))
         string = f'dx_{i}/dt= '
         for j in range(len(params_i)):
             if abs(params_i[j]) > tol:
