@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import re
 import pandas as pd
+from formatting_helpers import *
 matplotlib.use('TkAgg')
 
 
@@ -370,50 +371,6 @@ def plot_time_series_comp(X_list, labels, m, n_series, causal_params=None):
     # Show the plot
     plt.grid()
     plt.show()
-
-
-'''
-Helper functions for converting terms (as n-arrays) into strings
-'''
-
-# Function to convert term values into a sum representation
-def rhs_as_sum(terms, latex=True):
-    term_strings = []
-    for coeff, term in terms:
-        if all(term[j] == 0 for j in range(len(term))):
-            term_strings.append(f'{coeff:.2f}')
-        else:
-            coeff_string = f'{coeff:.2f}'
-            term_string = ''
-            term_string += get_termstring(term, latex)  # f'$x_{{{j}}}^{{{term[j]}}}$'
-            term_strings.append(coeff_string + term_string)
-    if len(terms) > 0:
-        polynomial_str = ' + '.join(term_strings)
-        return polynomial_str
-    else:
-        return '0'
-
-
-def get_termstring(term, latex=False):
-    term_string = ''
-    for j in range(len(term)):
-        if term[j] > 0:
-            if latex:
-                term_string += f'$x_{{{j}}}^{{{term[j]}}}$'
-            else:
-                term_string += f'x_{j}^{term[j]}'
-    # if all(term[j] == 0 for j in range(len(term))):
-    #     term_string += '1'
-    return term_string
-
-def print_causal_relationships(causal_params):
-    n = len(causal_params.keys())
-    for i in range(n):
-        # Display causal relationships if available
-        if causal_params is not None and i in causal_params:
-            terms = causal_params[i]
-            causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
-        print(causal_str)
 
 
 if __name__ == '__main__':

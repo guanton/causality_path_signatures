@@ -1,5 +1,5 @@
 from generate_temporal_data import *
-from signature_matching_polynomial_relations import *
+from solve_polynomial_relations import *
 from math import comb
 import pandas as pd
 
@@ -30,13 +30,13 @@ def generate_time_series(list_poly_strings, p, m, specified_edges, driving_noise
     return X, t, causal_params, ordered_monomials, derivative_df
 
 
-def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, solver = 'direct', tol = 0.1, alpha = None, n_series = 1, n_seed = 0):
+def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, solver = 'direct', tol = 0.1, alpha = None, n_series = 1, n_seed = 0, index_place = 1):
     sub = generate_subintervals(t, 'one')[0].tolist()
     n_params = len(ordered_monomials)
     # create the necessary multi_indices for each variable
     multi_indices = []
     for l in range(m):
-        multi_indices.append(generate_multi_indices(l, k, n_params, m, n_seed=n_seed))
+        multi_indices.append(generate_multi_indices(l, k, n_params, m, j=index_place, n_seed=n_seed))
     recovered_causal_params = solve_parameters(X, m, derivative_df, multi_indices, ordered_monomials, sub, copies, alpha=alpha, tol = tol, solver = solver)
     return recovered_causal_params
 def estimate_coefficients_sub(X, t, n, ordered_monomials, solver = 'direct', tol = 0.1, alpha = None, sub_mode = 'zeros',
@@ -105,11 +105,11 @@ def estimate_coefficients_test(method, X, n, ordered_monomials, solver = 'direct
 if __name__ == '__main__':
     # Choose parameters for creating the data
     m = 2 # number of causal variables
-    p = 2
+    p = 2 # polynomial degree considered
     n_steps = 100  # number of time points per variable
     n_series = 5
     specified_edges = [(0,0), (1,0)] # list of edges in the causal graph
-    list_poly_strings = ['5x_1x_0 + 2', '-0.2']
+    list_poly_strings = ['2', '-2']
     start_t = 0
     end_t = 1
     n_seed = 0
@@ -133,12 +133,13 @@ if __name__ == '__main__':
     # print('From the original noiseless data: ')
     # estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol, alpha = alpha, sub_mode = sub_mode, n_subs = n_subs)
     # Solve parameters from the noisy data
-    print(f'From the noisy data: ')
+    print(f'Approximated from the noisy data with method {method}: ')
     if method == 'integrals':
         sub_mode = 'one'
         k = len(ordered_monomials)
         copies = np.arange(n_series).tolist()
-        recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed)
+        index_place = 0
+        recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed, index_place = index_place)
         X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
                                zero_init=True, n_seed = 0)
     elif method == 'subs':

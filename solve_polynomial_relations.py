@@ -1,191 +1,39 @@
 import numpy as np
 from sklearn.linear_model import Ridge, LinearRegression, Lasso
-from generate_temporal_data import *
+from subintervals import *
+from multi_indices import *
+from formatting_helpers import *
 from sklearn.preprocessing import StandardScaler
-
-def generate_subintervals(t, sub_mode, n = None):
-    '''
-    generates subintervals according to the specified mode
-    :param t: array of times (ex. np.linspace(0, 1, 100))
-    :param sub_mode: random, all, zeros, or adjacent
-    :param n: number of subintervals to be created
-    :return:
-    '''
-    subintervals = []
-    if sub_mode == 'random':
-        if n is None:
-            n = 2*len(t)
-        for _ in range(n):
-            # Randomly choose indices for min_t and max_t
-            min_index = np.random.randint(0, len(t) - 1)
-            max_index = np.random.randint(min_index + 1, len(t))  # Ensure max_index > min_index
-            # Extract subinterval indices
-            indices = np.where((t >= t[min_index]) & (t <= t[max_index]))
-            subintervals.append(indices[0])
-    elif sub_mode == 'all':
-        for i in range(len(t)):
-            for j in range(i + 1, len(t)):
-                min_t = t[i]
-                max_t = t[j]
-                indices = np.where((t >= min_t) & (t <= max_t))
-                subintervals.append(indices[0])
-    elif sub_mode == 'zeros':
-        min_t = t[0]
-        for i in range(1, len(t)):
-            max_t = t[i]
-            indices = np.where((t >= min_t) & (t <= max_t))
-            subintervals.append(indices[0])
-    elif sub_mode == 'adjacent':
-        delta = 5
-        for i in range(len(t) - delta):
-            min_t = t[i]
-            max_t = t[i + delta]
-            indices = np.where((t >= min_t) & (t <= max_t))
-            subintervals.append(indices[0])
-    elif sub_mode == 'one':
-        min_t = t[0]
-        max_t = t[-1]
-        indices = np.where((t >= min_t) & (t <= max_t))
-        subintervals.append(indices[0])
-    return subintervals
-
-def generate_multi_indices(l, k, n_params, m, n_seed=None):
-    if n_seed is not None:
-        np.random.seed(n_seed)
-
-    assert k >= n_params, "k must be greater than or equal to n_params"
-
-    multi_indices = []
-    for _ in range(k):
-        multi_index = [l] # begin with the variable of interest
-        multi_indices.append(multi_index)
-        word_length = np.random.randint(m)
-        # Append additional elements to the multi-index
-        for _ in range(word_length):
-            multi_index.append(np.random.randint(0, m))  # Adjust the upper bound as needed
-
-        multi_indices.append(tuple(multi_index))
-
-    return multi_indices
-
-
-
-
-def create_subintervals_dict(subintervals, t):
-    '''
-    organizes subintervals according to their order in the list and time values
-    :param subintervals: list of subintervals (list of pairs of indices)
-    :param t: array of times (ex. np.linspace(0, 1, 100))
-    :return:
-    '''
-    sub_dict = {}
-    counter = 0
-    for subinterval in subintervals:
-        t_1 = t[subinterval[0]]
-        t_2 = t[subinterval[1]]
-        sub_dict[counter] = (t_1, t_2)
-        counter += 1
-    return sub_dict
-
-
-def compute_level_1_path(x_i, a, b):
-    '''
-    This computes S^i_(a,b) where (a,b) are the endpoints of the subinterval
-    :param x_i: time_series data for x_i
-    :param a: start time index
-    :param b: end time index
-    :return: path integral S^i_(a,b)
-    '''
-    path = x_i[b] - x_i[a]
-    return path
-
-def compute_path_monomial(X, m, copy, monomial, a, b):
-    '''
-    :param X: df for time series data for all variables X_i
-    :param copy: which copy of the time series we are using
-    :param monomial: the monomial that we will be integrating against
-    :param a: start time index
-    :param b: end time index
-    :return:
-    '''
-    relevant_variables = [v for v in range(m) if monomial[v] != 0]
-    degrees = [monomial[v] for v in relevant_variables]
-
-
-    monomial_value_a, monomial_value_b = 1, 1
-    for v, degree in zip(relevant_variables, degrees):
-        x_v = X.loc[:, (v, copy)].to_numpy()
-        monomial_value_a *= x_v[a] ** degree
-        monomial_value_b *= x_v[b] ** degree
-    return monomial_value_b - monomial_value_a
-
-
-def compute_integral(t, integrator, derivatives_df, i_k, copy, j):
-    '''
-    :param t: array of times
-    :param integrator: integrator function as array of its values from time t[0] to t[j]
-    :param derivatives_df: df for the derivatives of the time series data
-    :param i_k: the index of the variable that we are integrating aginst
-    :param copy: the index of the copy that we are considering for the variables
-    :param j: t[j] is the endpoint of the integral
-    :return:
-    '''
-    mi = (i_k, copy)
-    h = (t[-1] - t[0])/(len(t)-1)
-    derivatives_array = derivatives_df.loc[:j, mi].to_numpy()
-    integral = 0
-    assert len(integrator) == j, "integrator dimension does not align with the time interval"
-    for i in range(j):
-        rect = integrator[i] * derivatives_array[i] * h
-        integral += rect
-    return integral
-
-def compute_iterated_integral(X, m, derivatives_df, copy, multi_index, subinterval, monomial = None):
-    t = X.index.to_numpy()
-    integrator = [0] * len(subinterval)  # Initialize integrator as a list
-    for k in range(len(multi_index)):
-        for s in subinterval:
-            i_k = multi_index[k]  # extract current index
-            if k == 0:
-                if monomial is None:
-                    x_i = X.loc[:, (i_k, copy)].to_numpy()
-                    integrator[s] = compute_level_1_path(x_i, 0, s)
-                else:
-                    integrator[s] = compute_path_monomial(X, m, copy, monomial, 0, s)
-            else:
-                integrator_s = integrator[:s]
-                integrator[s] = compute_integral(t, integrator_s, derivatives_df, i_k, copy, s)
-    return integrator[-1]
-
-
+from integrals import *
 def compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indices, sub, copy):
     """
-        This computes the corresponding matrix M (n_params x n_params) for variable x_i
-        :param X: df for time series data for all variables X_i
-        :param l: the causal variable of interest
-        :param n_params: number of parameters to recover (monomial coefficients)
-        :param ordered_monomials: dictionary of monomials, ordered
-        :param multi_indices: list of multi-indices (all beginning with i)
-        :param sub:
-        :return:
-        """
+    This computes the corresponding matrix M (n_params x n_params) for variable x_l
+    :param X: df for time series data for all variables X_i
+    :param l: the causal variable of interest
+    :param n_params: number of parameters to recover (monomial coefficients)
+    :param ordered_monomials: dictionary of monomials, ordered
+    :param multi_indices: list of multi-indices (all beginning with l)
+    :param sub:
+    :param copy:
+    :return:
+    """
     M = np.zeros((len(multi_indices), n_params))
     for i, multi_index in enumerate(multi_indices):
-        assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
+        # assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
         for j in range(n_params):
             monomial = ordered_monomials[j]
             if j > 0:
-                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub, monomial = monomial)
+                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub, monomial=monomial)
             else:
-                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub, monomial = None)
+                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub, monomial=None)
     return M
 
 
 def compute_b(X, m, l, derivatives_df, multi_indices, sub, copy):
     b = np.empty((len(multi_indices), 1), dtype=np.float64)
     for i, multi_index in enumerate(multi_indices):
-        assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
-        b[i, 0] = compute_iterated_integral(X, m, derivatives_df, copy, multi_index, sub)
+        # assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
+        b[i, 0] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub)
     return b
 
 
@@ -313,50 +161,6 @@ def compute_M_subs(X, n_params, ordered_monomials, subintervals, t, n, level, sa
                     # set corresponding matrix entry
                     M[(i+1)*len(subintervals) + k, j] = integral
     return M
-
-def convert_df_to_array(X):
-    """
-    Convert DataFrame X to a NumPy array.
-
-    Parameters:
-    - X: DataFrame with multi-level columns (variable, copy) and time indices
-
-    Returns:
-    - X_array: NumPy array with time indices as the first dimension and variables as the second dimension
-    """
-
-    # Assuming copy is fixed at 0
-    copy_value = 0
-
-    # Use .xs to cross-section the DataFrame
-    X_fixed_copy = X.xs(key=copy_value, axis=1, level='copy').to_numpy()
-
-    return X_fixed_copy
-
-
-def convert_array_to_df(X_array, t, m):
-    """
-    Convert NumPy array X_array to a DataFrame.
-
-    Parameters:
-    - X_array: NumPy array with time indices as the first dimension and variables as the second dimension
-    - t: Array of time indices
-    - m: Number of variables
-
-    Returns:
-    - X_df: DataFrame with multi-level columns (variable, copy) and time indices
-    """
-
-    # Assuming copy is fixed at 0
-    copy_values = [0]
-
-    # Create MultiIndex for columns
-    mi = pd.MultiIndex.from_product([range(m), copy_values], names=['variable', 'copy'])
-
-    # Create DataFrame
-    X_df = pd.DataFrame(X_array, index=t, columns=mi)
-
-    return X_df
 
 def solve_parameters_sub(X, t, n_monomials, subintervals, M, ordered_monomials, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
     """
