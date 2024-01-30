@@ -54,7 +54,7 @@ def compute_iterated_integral(X, m, derivatives_df, copy, l, word, subinterval, 
     :return: The computed iterated integral
     '''
     t = X.index.to_numpy()
-    X = convert_df_to_array(X)
+    # X = convert_df_to_array(X)
     integrators = {}
     for idx in range(len(word)):
         integrators[idx] = [0] * len(subinterval)  # Initialize each integrator as a list of values over the subinterval
@@ -67,20 +67,19 @@ def compute_iterated_integral(X, m, derivatives_df, copy, l, word, subinterval, 
                 # case where we are replacing the first index with the monomial for x_l
                 if j_index == 0 and monomial is not None:
                     assert letter == l, "the provided index must correspond to the variable of interest"
-                    t_sub = [t[idx] for idx in subinterval]
-                    relevant_variables = [v for v in range(m) if monomial[v] != 0]
-                    degrees = [monomial[v] for v in relevant_variables]
-                    # collect all monomial values over all time indices in the subinterval
-                    monomial_values_subinterval = [
-                        np.prod([X[idx, v] ** degree for v, degree in zip(relevant_variables, degrees)]) for idx in
-                        subinterval]
-                    # integrate the jth monomial with respect to the ith subinterval using trapezoidal method
-                    integral = np.trapz(monomial_values_subinterval, x=t_sub)
-                    integrators[0][s] = integral
-                    # compute_path_monomial(X, m, copy, monomial, 0, s)
+                    # t_sub = [t[idx] for idx in subinterval]
+                    # relevant_variables = [v for v in range(m) if monomial[v] != 0]
+                    # degrees = [monomial[v] for v in relevant_variables]
+                    # # collect all monomial values over all time indices in the subinterval
+                    # monomial_values_subinterval = [
+                    #     np.prod([X[idx, v] ** degree for v, degree in zip(relevant_variables, degrees)]) for idx in
+                    #     subinterval]
+                    # # integrate the jth monomial with respect to the ith subinterval using trapezoidal method
+                    # integral = np.trapz(monomial_values_subinterval, x=t_sub)
+                    integrators[0][s] = compute_path_monomial(X, m, copy, monomial, 0, s)
                 else:
                     # otherwise, integrate normally against the given variable
-                    x_i = X[:, letter]
+                    x_i = X.loc[:, (letter, copy)].to_numpy()#X[:, letter]
                     integrators[0][s] = compute_level_1_path(x_i, 0, s)
             else:
                 print('higher iteration')

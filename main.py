@@ -115,7 +115,7 @@ if __name__ == '__main__':
     alpha = 0.0001
     tol = 0.01
     n_subs = None
-    method = 'subs'
+    method = 'integrals'
     # # Solve parameters from the original data
     # print('From the original noiseless data: ')
     # estimate_coefficients(X, t, n, ordered_monomials, solver=solver, tol=tol, alpha = alpha, sub_mode = sub_mode, n_subs = n_subs)
