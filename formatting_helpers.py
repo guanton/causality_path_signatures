@@ -43,6 +43,9 @@ def print_causal_relationships(causal_params):
             causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
         print(causal_str)
 
+'''
+Helper functions to convert between numpy array and pandas df representations of data
+'''
 def convert_array_to_df(X_array, t, m):
     """
     Convert NumPy array X_array to a DataFrame.
@@ -75,7 +78,7 @@ def convert_df_to_array(X):
     - X: DataFrame with multi-level columns (variable, copy) and time indices
 
     Returns:
-    - X_array: NumPy array with time indices as the first dimension and variables as the second dimension
+    - X_array: numpy array with time indices as the first dimension and variables as the second dimension
     """
 
     # Assuming copy is fixed at 0

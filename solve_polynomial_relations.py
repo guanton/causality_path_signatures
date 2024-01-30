@@ -1,44 +1,51 @@
 import numpy as np
 from sklearn.linear_model import Ridge, LinearRegression, Lasso
 from subintervals import *
-from multi_indices import *
+from words import *
 from formatting_helpers import *
 from sklearn.preprocessing import StandardScaler
 from integrals import *
-def compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indices, sub, copy):
+def compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, words, interest_indices, subs, copy):
     """
     This computes the corresponding matrix M (n_params x n_params) for variable x_l
     :param X: df for time series data for all variables X_i
     :param l: the causal variable of interest
     :param n_params: number of parameters to recover (monomial coefficients)
     :param ordered_monomials: dictionary of monomials, ordered
-    :param multi_indices: list of multi-indices (all beginning with l)
+    :param words: list of multi-indices (all featuring l at some position)
+    :param interest_indices: list of indices for the position of l (to be replaced by monomial)
     :param sub:
     :param copy:
     :return:
     """
-    M = np.zeros((len(multi_indices), n_params))
-    for i, multi_index in enumerate(multi_indices):
-        # assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
-        for j in range(n_params):
-            monomial = ordered_monomials[j]
-            if j > 0:
-                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub, monomial=monomial)
-            else:
-                M[i, j] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub, monomial=None)
+    # t = X.index
+    # X = convert_df_to_array(X)
+    # level = 1
+    # sub_dict = create_subintervals_dict(subs, t)
+    # return compute_M_subs(X, n_params, ordered_monomials, subs, t, m, level, sample_noise = True, sub_dict = sub_dict, driving_noise_scale = 0.1)
+    M = np.zeros((len(subs)*len(words), n_params))
+    for k, sub in enumerate(subs):
+        for i, word in enumerate(words):
+            # assert word[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
+            for j in range(n_params):
+                monomial = ordered_monomials[j]
+                M[i+k*len(words), j] = compute_iterated_integral(X, m, derivatives_df, copy, l, word, sub, monomial=monomial, j_index = interest_indices[i])
     return M
 
 
-def compute_b(X, m, l, derivatives_df, multi_indices, sub, copy):
-    b = np.empty((len(multi_indices), 1), dtype=np.float64)
-    for i, multi_index in enumerate(multi_indices):
-        # assert multi_index[0] == l, f"the multi-index must begin with the specified variable of interest {i}"
-        b[i, 0] = compute_iterated_integral(X, m, derivatives_df, copy, l, multi_index, sub)
+def compute_b(X, m, l, derivatives_df, words, subs, copy):
+    # x_l = X.loc[:, (l,copy)].tolist()
+    # return compute_level_1_paths(x_l, subs)
+
+    b = np.empty((len(subs)*len(words), 1), dtype=np.float64)
+    for i, sub in enumerate(subs):
+        for j, word in enumerate(words):
+            b[i*len(word) + j, 0] = compute_iterated_integral(X, m, derivatives_df, copy, l, word, sub)
     return b
 
 
 
-def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub, copies, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
+def solve_parameters(X, m, derivatives_df, words_per_variable, interest_indices_per_variable, ordered_monomials, sub, copies, alpha=1, tol = 1e-1, solver = 'direct', level = 1):
     """
     :param X: time series data for all variables x_i
     :param n_monomials:  number of parameters to recover
@@ -57,9 +64,9 @@ def solve_parameters(X, m, derivatives_df, multi_indices, ordered_monomials, sub
         bs = []
         Ms = []
         for copy in copies:
-            b = compute_b(X, m, l, derivatives_df, multi_indices[l], sub, copy)
+            b = compute_b(X, m, l, derivatives_df, words_per_variable[l], sub, copy)
             bs.append(b)
-            M = compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, multi_indices[l], sub, copy)
+            M = compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, words_per_variable[l], interest_indices_per_variable[l], sub, copy)
             Ms.append(M)
         # average over the n_series different copies
         b = np.average(bs, axis=0)
