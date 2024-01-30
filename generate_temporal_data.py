@@ -318,13 +318,13 @@ def plot_time_series(X, m, n_series, causal_params=None):
 
 
 
-def plot_time_series_comp(X_list, labels, m, n_series, causal_params=None):
+def plot_time_series_comp(X_list, labels, m, n_series, causal_params_list=None):
     '''
     :param t:
     :param X_list: [X given no noise, observed noisy X, recovered X using polynomial relations from noisy)
     :param labels:
     :param m:
-    :param causal_params:
+    :param causal_params_list:
     :return:
     '''
     # Extract the time series data for each variable
@@ -345,20 +345,29 @@ def plot_time_series_comp(X_list, labels, m, n_series, causal_params=None):
                      linestyle=next(linecycler),
                      color=color)
         # Display causal relationships if available
-        if causal_params is not None and i in causal_params:
-            terms = causal_params[i]
-            causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+        if causal_params_list is not None:
+            for idx in range(len(causal_params_list)):
+                causal_params = causal_params_list[idx]
+                if i in causal_params:
+                    terms = causal_params[i]
+                    causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+                    x_position = time_values[-1] - 0.1  # Slightly to the left of the end of the curve
+                    y_position = X.loc[X.index[-1], (i, 0)] + 0.2*idx
+                    # Define the text box properties
+                    textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
+                    # Create a multiline text box
+                    plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
 
-            # Calculate the position for the text box near the curve
-            x_position = time_values[-1] - 0.1   # Slightly to the left of the end of the curve
-            y_position = X.loc[X.index[-1], (i, 0)]
-            # y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
+                #
+                # for idx in range(len(causal_str_list)):
+                #     causal_str = causal_str_list[idx]
+                #     # Calculate the position for the text box near the curve
+                #     x_position = time_values[-1] - idx  # Slightly to the left of the end of the curve
+                #     X = X_list[idx]
+                #     y_position = X.loc[X.index[idx], (i, 0)]
+                # y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
 
-            # Define the text box properties
-            textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
 
-            # Create a multiline text box
-            plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
 
     # Customize the plot
     plt.xlabel('Time')

@@ -124,10 +124,10 @@ if __name__ == '__main__':
     # Solve parameters from the noisy data
     print(f'Approximated from the noisy data with method {method}: ')
     if method == 'integrals':
-        k = 2
+        k = 1
         copies = np.arange(n_series).tolist()
-        index_place = 1
-        sub_mode = 'one'
+        index_place = 0
+        sub_mode = 'zeros'
         recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df_, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed, index_place = index_place, sub_mode=sub_mode)
         X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
                                zero_init=True, n_seed = 0)
@@ -142,9 +142,8 @@ if __name__ == '__main__':
                                               measurement_noise_scale=0, n_series=1,
                                               zero_init=True, n_seed=0)
         X_ = convert_array_to_df(X_, t, m)
-
     # Plot the time series data
-    plot_time_series_comp([X_, X_recovered_], ['Original', 'Recovered'], m, n_series, causal_params)
+    plot_time_series_comp([X_, X_recovered_], ['Original', 'Recovered'], m, n_series, causal_params_list = [causal_params, recovered_causal_params_])
 
 
     # plot_time_series_comp(t, X_, X_recovered, n, causal_params)
