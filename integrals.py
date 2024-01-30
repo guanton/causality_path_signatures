@@ -21,14 +21,12 @@ def compute_path_monomial(X, m, copy, monomial, a, b):
     :return:
     '''
     t = X.index
-    t_sub = [t[idx] for idx in range(a, b)]
-    relevant_variables = [v for v in range(m) if monomial[v] != 0]
-    degrees = [monomial[v] for v in relevant_variables]
+    t_sub = [t[idx] for idx in range(a, b+1)] # b+1 for including b
     # collect all monomial values over all time indices in the subinterval
     monomial_values_subinterval = extract_monomial_time_values(X, monomial, b, m, copy)
     integral = np.trapz(monomial_values_subinterval, x=t_sub)
     return integral
-
+    #
     # relevant_variables = [v for v in range(m) if monomial[v] != 0]
     # degrees = [monomial[v] for v in relevant_variables]
     #
@@ -38,6 +36,7 @@ def compute_path_monomial(X, m, copy, monomial, a, b):
     #     monomial_value_a *= x_v[a] ** degree
     #     monomial_value_b *= x_v[b] ** degree
     # return monomial_value_b - monomial_value_a
+
 
 def compute_iterated_integral(X, m, derivatives_df, copy, l, word, subinterval, monomial=None, j_index=None):
     '''
@@ -82,9 +81,8 @@ def compute_iterated_integral(X, m, derivatives_df, copy, l, word, subinterval, 
                     x_i = X.loc[:, (letter, copy)].to_numpy()#X[:, letter]
                     integrators[0][s] = compute_level_1_path(x_i, 0, s)
             else:
-                print('higher iteration')
                 # we will be integrating against the previous level
-                integrator_s = integrators[idx - 1][:s]
+                integrator_s = integrators[idx - 1][:s+1]
                 # case where letter corresponds to the monomial for x_l
                 if j_index == idx and monomial is not None:
                     assert letter == l, "the provided index must correspond to the variable of interest"
@@ -105,38 +103,68 @@ def extract_monomial_time_values(X, monomial, j, m, copy):
     '''
     relevant_variables = [v for v in range(m) if monomial[v] != 0]
     degrees = [monomial[v] for v in relevant_variables]
-    monomial_time_values = [1 for s in range(j)]
+    monomial_time_values = [1 for s in range(j+1)]
     for v, degree in zip(relevant_variables, degrees):
         x_v = X.loc[:, (v, copy)].to_numpy()
-        for s in range(j):
-            # print('x_v[s]:', x_v[s])
-            # print('X.loc[t[s], (v,copy)]:', X.loc[t[s], (v,copy)])
+        for s in range(j+1):
             monomial_time_values[s] *= x_v[s] ** degree
     return monomial_time_values
-
-
-def compute_integral(t, integrator, derivatives_df, i_k, copy, j, monomial_time_values = None):
+def compute_integral(t, integrator, derivatives_df, i_k, copy, j, monomial_time_values=None):
     '''
     :param t: array of times
     :param integrator: integrator function as array of its values from time t[0] to t[j]
     :param derivatives_df: df for the derivatives of the time series data
-    :param i_k: the index of the variable that we are integrating aginst
+    :param i_k: the index of the variable that we are integrating against
     :param copy: the index of the copy that we are considering for the variables
     :param j: t[j] is the endpoint of the integral
     :param monomial_time_values: if not None, we will instead integrate against the provided monomial
-    :return:
+    :return: integral value
     '''
     mi = (i_k, copy)
-    h = (t[-1] - t[0])/(len(t)-1)
-    derivatives_array = derivatives_df.loc[:j, mi].to_numpy()
-    integral = 0
-    assert len(integrator) == j, "integrator dimension does not align with the time interval"
     if monomial_time_values is None:
-        for i in range(j):
-            rect = integrator[i] * derivatives_array[i] * h
-            integral += rect
+        values_to_integrate = derivatives_df.loc[:t[j], mi].to_numpy()  # inclusive indexing for pandas
+        # print('ok: ', values_to_integrate)
+
     else:
-        for i in range(j):
-            rect = integrator[i] * monomial_time_values[i] * h
-            integral += rect
+        values_to_integrate = np.array(monomial_time_values[:j+1])  # exclusive indexing for list
+
+    # Ensure that the length of the integrator matches the length of the values to integrate
+    assert len(integrator) == len(values_to_integrate), f"integrator dimension: {len(integrator)} does not align with dimension of values to integrate: {len(values_to_integrate)}"
+
+    # Compute the integral using the trapezoidal rule
+    t_sub = t[:j+1]
+    integral = np.trapz(values_to_integrate * integrator[:j+1], x=t_sub)
+
     return integral
+
+# def compute_integral(t, integrator, derivatives_df, i_k, copy, j, monomial_time_values = None):
+#     '''
+#     :param t: array of times
+#     :param integrator: integrator function as array of its values from time t[0] to t[j]
+#     :param derivatives_df: df for the derivatives of the time series data
+#     :param i_k: the index of the variable that we are integrating aginst
+#     :param copy: the index of the copy that we are considering for the variables
+#     :param j: t[j] is the endpoint of the integral
+#     :param monomial_time_values: if not None, we will instead integrate against the provided monomial
+#     :return:
+#     '''
+#
+#     mi = (i_k, copy)
+#     h = (t[-1] - t[0])/(len(t)-1)
+#     derivatives_array = derivatives_df.loc[:j, mi].to_numpy()
+#     integral = 0
+#     assert len(integrator) == j, "integrator dimension does not align with the time interval"
+#     if monomial_time_values is None:
+#         for i in range(j):
+#             rect = integrator[i] * derivatives_array[i] * h
+#             integral += rect
+#     else:
+#         for i in range(j):
+#             rect = integrator[i] * monomial_time_values[i] * h
+#             integral += rect
+#     return integral
+#
+#  t_sub = [t[idx] for idx in range(j)]
+#
+#     integral = np.trapz(monomial_values_subinterval, x=t_sub)
+#     return integral

@@ -30,7 +30,7 @@ def generate_time_series(list_poly_strings, p, m, specified_edges, driving_noise
     return X, t, causal_params, ordered_monomials, derivative_df
 
 
-def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, solver = 'direct', tol = 0.1, alpha = None, n_series = 1, n_seed = 0, index_place = 1):
+def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, solver = 'direct', tol = 0.1, alpha = None, n_series = 1, n_seed = 0, index_place = 1, sub_mode = 'one'):
     '''
     :param X:
     :param m:
@@ -46,7 +46,7 @@ def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, sol
     :param index_place:
     :return:
     '''
-    subs = generate_subintervals(t, 'zeros')
+    subs = generate_subintervals(t, sub_mode)
     n_params = len(ordered_monomials)
     # create the necessary words for each variable
     words_per_variable = []
@@ -55,6 +55,8 @@ def estimate_coefficients(X, m, derivative_df, ordered_monomials, k, copies, sol
         words_for_l, interest_indices_l = generate_all_words(l, m, index_place, k)
         words_per_variable.append(words_for_l)
         interest_indices_per_variable.append(interest_indices_l)
+    # print('words_per_variable:', words_per_variable)
+    # print('interest_indices:', interest_indices_per_variable)
     recovered_causal_params = solve_parameters(X, m, derivative_df, words_per_variable, interest_indices_per_variable, ordered_monomials, subs, copies, alpha=alpha, tol = tol, solver = solver)
     return recovered_causal_params
 def estimate_coefficients_sub(X, t, n, ordered_monomials, solver = 'direct', tol = 0.1, alpha = None, sub_mode = 'zeros',
@@ -88,8 +90,8 @@ if __name__ == '__main__':
     p = 2 # polynomial degree considered
     n_steps = 100  # number of time points per variable
     n_series = 1
-    specified_edges = [(0,0), (1,0)] # list of edges in the causal graph
-    list_poly_strings = ['2x_0+1x_1-1', '-0.2']
+    specified_edges = [(0,0), (1,0), (1,1)] # list of edges in the causal graph
+    list_poly_strings = ['5x_1x_0 -1x_0 + 2x_0+0.3', '-0.2 + -1x_1']
     start_t = 0
     end_t = 1
     n_seed = 0
@@ -122,21 +124,20 @@ if __name__ == '__main__':
     # Solve parameters from the noisy data
     print(f'Approximated from the noisy data with method {method}: ')
     if method == 'integrals':
-        sub_mode = 'zeros'
-        k = 1
+        k = 2
         copies = np.arange(n_series).tolist()
-        index_place = 0
-        recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df_, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed, index_place = index_place)
+        index_place = 1
+        sub_mode = 'one'
+        recovered_causal_params_ = estimate_coefficients(X_, m, derivative_df_, ordered_monomials, k, copies, solver = solver, tol = tol, alpha = alpha, n_series = n_series, n_seed = n_seed, index_place = index_place, sub_mode=sub_mode)
         X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0, measurement_noise_scale=0, n_series=1,
                                zero_init=True, n_seed = 0)
     elif method == 'subs':
         sub_mode = 'zeros'
         n_series = 1
         X_ = convert_df_to_array(X_)
-        level = 1
         recovered_causal_params_ = estimate_coefficients_sub(X_, t, m, ordered_monomials, solver=solver, sample_noise=False,
                                                          tol=tol, alpha=alpha,
-                                                         sub_mode=sub_mode, n_subs=n_subs, level=level)
+                                                         sub_mode=sub_mode, n_subs=n_subs, level=1)
         X_recovered_ = generate_temporal_data(recovered_causal_params_, m, t, driving_noise_scale=0,
                                               measurement_noise_scale=0, n_series=1,
                                               zero_init=True, n_seed=0)
