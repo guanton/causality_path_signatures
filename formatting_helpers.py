@@ -43,6 +43,19 @@ def print_causal_relationships(causal_params):
             causal_str = f'dx_{i}' + f'/dt = {rhs_as_sum(terms, latex=False)}'
         print(causal_str)
 
+def create_method_name(sub_mode, word_mode, n_words = None, k = None):
+    method_name = f'Integral Matching with {sub_mode}' + ' Subinterval'
+    if sub_mode == 'one':
+        method_name += f' and {word_mode} Generated Multi-indices'
+    else:
+        method_name += f's and {word_mode} Generated Multi-indices'
+    if word_mode == 'all':
+        method_name += f' up to Level {k}'
+    elif word_mode == 'random':
+        method_name += f' ({n_words} words)'
+    return method_name
+
+
 '''
 Helper functions to convert between numpy array and pandas df representations of data
 '''

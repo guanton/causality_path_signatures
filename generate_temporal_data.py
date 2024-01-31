@@ -317,67 +317,49 @@ def plot_time_series(X, m, n_series, causal_params=None):
     plt.show()
 
 
-
-def plot_time_series_comp(X_list, labels, m, n_series, causal_params_list=None):
-    '''
-    :param t:
-    :param X_list: [X given no noise, observed noisy X, recovered X using polynomial relations from noisy)
-    :param labels:
-    :param m:
-    :param causal_params_list:
-    :return:
-    '''
-    # Extract the time series data for each variable
-    variable_names = [f'x{i}' for i in range(0, m)]  # Variable names x1, x2, ..., xn
+def plot_time_series_comp(X_list, labels, m, n_series, causal_params_list=None, method=None):
+    variable_names = [f'x{i}' for i in range(m)]
     X = X_list[0]
     time_values = X.index.to_numpy()
-    # Plot each variable for the original data (X)
     plt.figure(figsize=(12, 6))
-    # Plot each variable for the original data (X)
+
+    max_y_values = []  # Keep track of the maximum y-values for the curves
+
     for i in range(m):
-        color = plt.gca()._get_lines.get_next_color()  # Get the next color from the default color cycle
-        lines = ["-", "--", "-.", ":"]
-        linecycler = cycle(lines)
-        for j in range(len(X_list)):
-            X = X_list[j]
-            series_to_plot =  X.loc[:, (i, slice(None))].mean(axis=1).to_numpy()
-            plt.plot(time_values, series_to_plot, label=f'{variable_names[i]} ({labels[j]}) - mean over {n_series} copies',
-                     linestyle=next(linecycler),
-                     color=color)
-        # Display causal relationships if available
-        if causal_params_list is not None:
-            for idx in range(len(causal_params_list)):
-                causal_params = causal_params_list[idx]
-                if i in causal_params:
-                    terms = causal_params[i]
-                    causal_str = f'$dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
-                    x_position = time_values[-1] - 0.1  # Slightly to the left of the end of the curve
-                    y_position = X.loc[X.index[-1], (i, 0)] + 0.2*idx
-                    # Define the text box properties
-                    textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.8)
-                    # Create a multiline text box
-                    plt.text(x_position, y_position, causal_str, fontsize=10, ha='right', va='top', bbox=textbox_props)
+        color = plt.gca()._get_lines.get_next_color()
+        linecycler = cycle(["-", "--", "-.", ":"])
+        for j, X in enumerate(X_list):
+            series_to_plot = X.loc[:, (i, slice(None))].mean(axis=1).to_numpy()
+            plt.plot(time_values, series_to_plot,
+                     label=f'{variable_names[i]} ({labels[j]}) - mean over {n_series} copies',
+                     linestyle=next(linecycler), color=color)
+            if j % 2 == 0:  # Track max y-values for "Original" curves only
+                max_y_values.append(max(series_to_plot))
 
-                #
-                # for idx in range(len(causal_str_list)):
-                #     causal_str = causal_str_list[idx]
-                #     # Calculate the position for the text box near the curve
-                #     x_position = time_values[-1] - idx  # Slightly to the left of the end of the curve
-                #     X = X_list[idx]
-                #     y_position = X.loc[X.index[idx], (i, 0)]
-                # y_position = X_list[2][-1, i]  # Assuming the third X is the recovered one
-
-
-
-    # Customize the plot
+    if method is None:
+        plt.title('Time Series Data with Causal Relationships')
+    else:
+        plt.title(f'Recovered Time Series Data using {method}')
     plt.xlabel('Time')
     plt.ylabel('Value')
-    plt.title('Time Series Data with Causal Relationships')
-
-    # Add a legend to label each variable
     plt.legend()
 
-    # Show the plot
+    # Display causal relationships if available
+    if causal_params_list is not None:
+        textbox_props = dict(boxstyle='round', facecolor='white', edgecolor='black', alpha=0.5)
+        for i in range(m):
+            x_position = time_values[-1]  # End of the curve
+            # Original textbox
+            y_position_original = max_y_values[i]
+            terms = causal_params_list[0][i]
+            causal_str = f'Original: $dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+            plt.text(x_position, y_position_original, causal_str, fontsize=9, ha='right', va='bottom', bbox=textbox_props)
+            # Recovered textbox
+            terms = causal_params_list[1][i]
+            causal_str = f'Recovered: $dx_{{{i}}}$' + f'/dt = {rhs_as_sum(terms)}'
+            y_position_recovered = y_position_original - 0.03 * (plt.gca().get_ylim()[1] - plt.gca().get_ylim()[0])  # Slightly above the "Original"
+            plt.text(x_position, y_position_recovered, causal_str, fontsize=9, ha='right', va='top', bbox=textbox_props)
+
     plt.grid()
     plt.show()
 

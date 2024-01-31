@@ -69,8 +69,9 @@ def solve_parameters(X, m, derivatives_df, words_per_variable, interest_indices_
             M = compute_M(X, m, l, derivatives_df, n_params, ordered_monomials, words_per_variable[l], interest_indices_per_variable[l], sub, copy)
             Ms.append(M)
         # average over the n_series different copies
-        b = np.average(bs, axis=0)
-        M = np.average(Ms, axis=0)
+        if len(copies) > 1:
+            b = np.average(bs, axis=0)
+            M = np.average(Ms, axis=0)
         # compute b using the level 1 iterated integrals
         if solver == 'ridge':
             # Use Ridge regression with regularization
