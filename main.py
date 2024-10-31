@@ -105,11 +105,11 @@ def estimate_coefficients_sub(X, t, n, ordered_monomials, solver='direct', tol=0
 if __name__ == '__main__':
     # Choose parameters for creating the data
     m = 2  # number of causal variables
-    p = 1 # polynomial degree considered
-    n_steps = 100  # number of time points per variable
+    p = 2 # polynomial degree considered
+    n_steps = 500  # number of time points per variable
     n_series = 1
-    specified_edges = [(0, 0), (1, 0), (1, 1)]  # list of edges in the causal graph
-    list_poly_strings = ['5x_1+2x_0+0.3', '-0.2+-1x_1^2']
+    specified_edges = [(0, 0)]  # list of edges in the causal graph
+    list_poly_strings = ['0.5x_0']
     start_t = 0
     end_t = 1
     n_seed = 0
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     print('Actual polynomial relationships')
     print_causal_relationships(causal_params)
     measurement_noise_scale = 0
-    driving_noise_scale = 0.1
+    driving_noise_scale = 1
     # Generate the noisy data
     X_, t, causal_params, ordered_monomials, derivative_df_ = generate_time_series(list_poly_strings, p, m,
                                                                                    specified_edges,
@@ -153,7 +153,7 @@ if __name__ == '__main__':
     # Solve parameters from the noisy data
     print(f'Approximated from the noisy data with method {method}: ')
     if method == 'integrals':
-        k = 4
+        k = 2
         copies = np.arange(n_series).tolist()
         index_place = None
         sub_mode = 'one'

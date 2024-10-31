@@ -370,7 +370,7 @@ if __name__ == '__main__':
     m=2
     n_series = 3
     pa_dict = generate_causal_graph(m, [(0,0), (1, 0)])
-    list_poly_strings = ['3x_0x_1^2 + -7x_1 +5', '-0.2']
+    list_poly_strings = ['3x_0x_1 + -7x_1 +5', '-0.2']
     # i = 0
     # for p in list_poly_strings:
     #     print(f'dx_{i}/dt= {p}')
