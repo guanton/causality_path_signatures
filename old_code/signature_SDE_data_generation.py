@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pickle
 
+
 def simulate_sde(alpha_1_1, alpha_1_2, alpha_1_11, alpha_1_22, alpha_1_12, alpha_1_21,
                  alpha_2_1, alpha_2_2, alpha_2_11, alpha_2_22, alpha_2_12, alpha_2_21, T, N, integral_convention='ito'):
     dt = T / N  # Time step size
@@ -26,14 +27,18 @@ def simulate_sde(alpha_1_1, alpha_1_2, alpha_1_11, alpha_1_22, alpha_1_12, alpha
         if integral_convention == 'stratonovich':
             # Implement Stratonovich to Ito correction
             correction_1 = 0.5 * X1[i] * dt
+            integral_12 = integral_12 + correction_1
+            integral_11 = integral_11 + correction_1
             correction_2 = 0.5 * X2[i] * dt
+            integral_21 = integral_21 + correction_2
+            integral_22 = integral_22 + correction_2
             X1[i + 1] = X1[i] + alpha_1_1 * integral_1 + alpha_1_2 * integral_2 \
                         + alpha_1_11 * integral_11 + alpha_1_22 * integral_22 \
-                        + alpha_1_12 * integral_12 + alpha_1_21 * integral_21 + dW1[i] + correction_1
+                        + alpha_1_12 * integral_12 + alpha_1_21 * integral_21 + dW1[i]
 
             X2[i + 1] = X2[i] + alpha_2_1 * integral_1 + alpha_2_2 * integral_2 \
                         + alpha_2_11 * integral_11 + alpha_2_22 * integral_22 \
-                        + alpha_2_12 * integral_12 + alpha_2_21 * integral_21 + dW2[i] + correction_2
+                        + alpha_2_12 * integral_12 + alpha_2_21 * integral_21 + dW2[i]
         else:
             X1[i + 1] = X1[i] + alpha_1_1 * integral_1 + alpha_1_2 * integral_2 \
                         + alpha_1_11 * integral_11 + alpha_1_22 * integral_22 \
@@ -44,6 +49,7 @@ def simulate_sde(alpha_1_1, alpha_1_2, alpha_1_11, alpha_1_22, alpha_1_12, alpha
                         + alpha_2_12 * integral_12 + alpha_2_21 * integral_21 + dW2[i]
 
     return t, X1, X2
+
 def save_simulation_data(filename, t, X1, X2, params):
     """
     Save the simulation data and parameters to a file.
