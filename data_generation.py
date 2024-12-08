@@ -10,6 +10,7 @@ from plots import *
 import pandas as pd
 import json
 import itertools
+import argparse
 
 def generate_signature_multi_indices(d, q):
     """
@@ -88,7 +89,6 @@ def generate_variable_indices(m: int, q: int) -> dict:
     return variable_indices
 
 
-
 def set_coefficients_from_dict(a, b, variable_indices, coefficients, n):
     """
     Sets the coefficients in the drift and diffusion tensors based on the provided dictionary.
@@ -107,31 +107,33 @@ def set_coefficients_from_dict(a, b, variable_indices, coefficients, n):
     # Set drift coefficients from drift sub-dictionary
     drift_coeffs = coefficients.get('drift', {})
     for var_name, dependencies in drift_coeffs.items():
-        i = variable_indices.get(var_name)  # retrieve index of drift component
+        i = variable_indices.get(var_name)
         if i is None:
             continue
         for dep_var, value in dependencies.items():
-            k = variable_indices.get(dep_var) # retrieve index of influence on drift component
+            k = variable_indices.get(dep_var)
             if k is None:
                 continue
-            a = a.at[i, k].set(value) # set drift tensor at corresponding index to be the specified coefficient
+            a = a.at[i, k].set(value)
 
     # Set diffusion coefficients
     diffusion_coeffs = coefficients.get('diffusion', {})
-
     for var_name, dependencies in diffusion_coeffs.items():
-        i = variable_indices.get(var_name) # retrieve index of diffusion component
+        i = variable_indices.get(var_name)
         if i is None:
             continue
         for dep_var, bm_components in dependencies.items():
             k = variable_indices.get(dep_var)
             if k is None:
                 continue
-            # Set diffusion coefficients for each Brownian motion component
-            for j, value in bm_components.items():  # Iterate over Brownian motion components
-                if j < n:  # Ensure we don't exceed the tensor dimension
-                    b = b.at[i, j, k].set(value)
+            # Convert keys to int before checking
+            for j, value in bm_components.items():
+                j_int = int(j)  # Ensure we have an integer index
+                if j_int < n:
+                    b = b.at[i, j_int, k].set(value)
+
     return a, b
+
 
 
 
@@ -363,62 +365,41 @@ def estimate_GGT(trajectories, T, est_A=None):
 
 
 
-if __name__ == "__main__":
+def run_experiment(config: dict, experiment_name: str):
     t_1 = time.time()
-    # Parameters
-    N = 1000  # Number of trajectories
-    m = 2  # Number of primary variables (excluding time)
-    n = 1  # Dimension of Brownian motion W_t
-    q = 4  # Level of iterated integrals for simulation
-    q_iterated = 4 # Level of iterated integrals for iisignature computation
+
+    N = config["N"]
+    m = config["m"]
+    n = config["n"]
+    q = config["q"]
+    q_iterated = config["q_iterated"]
+    t1 = config["t1"]
+    dt = config["dt"]
+    coefficients = config["coefficients"]
+    base_key_val = config["base_key"]
+
     t0 = 0.0
-    t1 = 0.1
-    dt = 0.01
 
-    M, level_sizes = compute_total_variables(m, q)  # Total number of variables including higher-order terms
-
-    # Initial condition X0, shape (M,)
+    M, level_sizes = compute_total_variables(m, q)
     X0 = jnp.zeros(M)
-    X0 = X0.at[0].set(1.0)  # Zero-order term initialized to 1
-    X0 = X0.at[1].set(0.0)  # Time variable starts at t = 0
+    X0 = X0.at[0].set(1.0)
+    X0 = X0.at[1].set(0.0)
 
-
-
-    # Initialize the drift coefficient matrix a (M x M)
     a = jnp.zeros((M, M))
-
-    # Initialize the diffusion coefficient tensor b (M x n x M)
     b = jnp.zeros((M, n, M))
 
-    # Generate variable indices
     variable_indices_full = generate_all_variable_indices(m, q)
-
-    # Define your coefficients
-    coefficients = {
-        'drift': {
-            'Y_1': {'Y_1': -10},
-            'Y_2': {'Y_2': -0},
-        },
-        'diffusion': {
-            'Y_1': {'Y_0': {0: 0.1}},
-            'Y_2': {'Y_0': {0: 0.1}},
-        }
-    }
-
-    # Set the coefficients in 'a' and 'b'
     a, b = set_coefficients_from_dict(a, b, variable_indices_full, coefficients, n)
 
-    # Create the drift and diffusion functions
     drift = drift_function_with_time(m, q, a)
     diffusion = diffusion_function_with_time(m, n, q, b)
 
-    # Generate multiple trajectories
-    base_key = jax.random.PRNGKey(0)  # Base key
+    base_key = jax.random.PRNGKey(base_key_val)
     keys = jax.random.split(base_key, N)
 
     solutions = []
     for i in range(N):
-        sol, solver = solve_sde(
+        sol, solver_used = solve_sde(
             drift_function=drift,
             diffusion_function=diffusion,
             initial_condition=X0,
@@ -429,95 +410,66 @@ if __name__ == "__main__":
         )
         solutions.append(sol)
 
-    ys_array = jnp.stack([sol.ys for sol in solutions], axis=0)  # Shape: (N, T, M)
+    ys_array = jnp.stack([sol.ys for sol in solutions], axis=0)
     ys_array = np.array(ys_array)
-    # Extract primary variables
-    primary_data = ys_array[:, :, 2:m + 2]  # Shape: (N, T, m)
-    primary_data_with_time = ys_array[:, :, 1:m + 2]  # Shape: (N, T, m)
-    print('sanity', primary_data.shape)
-    # Estimate the drift matrix
+
+    primary_data = ys_array[:, :, 2:m + 2]
+    primary_data_with_time = ys_array[:, :, 1:m + 2]
+
     A_hat = estimate_A(primary_data, dt, pinv=True)
-    print("Estimated Drift Matrix A:")
-    print(A_hat)
     H_hat = estimate_GGT(primary_data, t1, A_hat)
-    print("Estimated Diffusion Matrix H:")
-    print(H_hat)
-
-
+    print('estimated A:', A_hat)
+    print('estimated H:', H_hat)
 
     t_2 = time.time()
     print('Total computation time:', t_2 - t_1)
 
-    # Prepare the signature computation
     sig_length = iisignature.siglength(m + 1, q_iterated)
-    # Initialize an array to hold the signatures
     signatures = np.zeros((N, sig_length))
-
-    for n in range(N):
-        path = primary_data_with_time[n, :, :]  # Shape: (T, m+1)
+    for n_ in range(N):
+        path = primary_data_with_time[n_, :, :]
         sig = iisignature.sig(path, q_iterated)
-        signatures[n, :] = sig
+        signatures[n_, :] = sig
 
-    print(signatures.shape)
-
-    # Compute the empirical expected signature
     expected_signature = np.mean(signatures, axis=0)
 
-    # Generate multi-indices for the signature terms
     variable_names = ['t'] + [f'Y_{i}' for i in range(1, m + 1)]
-    # For m=2, variable_names = ['t', 'Y_1', 'Y_2']
-
     multi_indices = generate_signature_multi_indices(m+1, q_iterated)
-    # multi_index_strings = ['_'.join(variable_names[i] for i in idx_tuple) for idx_tuple in multi_indices]
-
-    # Create mapping from multi_index strings to variable indices
-    multi_index_to_variable_index = {}
-    multi_index_strings = []
-
-    # Generate variable indices without 0 order term
     variable_indices = generate_variable_indices(m, q_iterated)
 
+    multi_index_strings = []
+    multi_index_to_variable_index = {}
     for idx_tuple in multi_indices:
         variable_name = '_'.join(variable_names[idx_j] for idx_j in idx_tuple)
         variable_index = variable_indices.get(variable_name)
         multi_index_strings.append(variable_name)
         multi_index_to_variable_index[variable_name] = variable_index
 
-    # Initialize list to hold expected values from SDE
     expected_value_sde = []
-
     for multi_idx_str in multi_index_strings:
         variable_index = multi_index_to_variable_index.get(multi_idx_str)
         if variable_index is not None and variable_index < ys_array.shape[2]:
-            # Extract variable values at variable_index from ys_array
-            variable_values = ys_array[:, -1, 1+variable_index]  # At final time point
+            variable_values = ys_array[:, -1, 1 + variable_index]
             expected_value = np.mean(variable_values)
         else:
-            expected_value = np.nan  # Variable not present in SDE solution
+            expected_value = np.nan
         expected_value_sde.append(expected_value)
 
-    # Create a DataFrame
     df = pd.DataFrame({
         'multi_index': multi_index_strings,
         'expected_value': expected_signature,
         'expected_value_sde': expected_value_sde
     })
-
-    # Add a 'level' column
     df['level'] = [len(idx_tuple) for idx_tuple in multi_indices]
-
-    # Compute the difference
     df['difference'] = df['expected_value'] - df['expected_value_sde']
 
-
-    print(df.head(sig_length))
-
-    # Save the DataFrame to CSV
-    experiment_name = 'simple_OU_1'
-    base_filename = f'{experiment_name}_expected_signatures_N-{N}_seed-{int(base_key[0])}'
-    csv_filename = base_filename + '.csv'
+    # Use the exact filenames requested by the user
+    # For example:
+    # For the first experiment: simple_OU_1_expected_signatures_N-1000_seed-0.csv
+    # We'll assume `experiment_name` is given as e.g. "simple_OU_1"
+    csv_filename = f"{experiment_name}_expected_signatures_N-{N}_seed-{base_key_val}.csv"
     df.to_csv(csv_filename, index=False)
-    # Prepare metadata
+
     metadata = {
         'N': N,
         'm': m,
@@ -528,16 +480,207 @@ if __name__ == "__main__":
         'dt': dt,
         'coefficients': coefficients,
         'base_key': int(base_key[0]),
-        'solver': solver.__class__.__name__,  # Include solver name
+        'solver': solver_used.__class__.__name__
     }
 
-
-    # Save metadata to JSON file
-    with open('metadata.json', 'w') as f:
+    json_filename = f"metadata_{experiment_name}_expected_signatures_N-{N}_seed-{base_key_val}.json"
+    with open(json_filename, 'w') as f:
         json.dump(metadata, f, indent=4)
 
+    # Plotting
     solution = solutions[0]
-    plot_primary_variables(solution, m)
-    # Plot all variables
-    plot_all_variables(solution)
-    plot_differences(df)
+    # plot_primary_variables(solution, m)
+    # plot_all_variables(solution)
+    # plot_differences(df)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", required=True, help="Path to JSON config file.")
+    parser.add_argument("--experiment_name", required=True, help="Base name for experiment.")
+    args = parser.parse_args()
+
+    with open(args.config, 'r') as f:
+        config = json.load(f)
+
+    run_experiment(config, args.experiment_name)
+
+
+#
+# if __name__ == "__main__":
+#     t_1 = time.time()
+#     experiment_name = 'proper_level_2_drift_and_diffusion_1'
+#     # Parameters
+#     N = 1000  # Number of trajectories
+#     m = 2  # Number of primary variables (excluding time)
+#     n = 1  # Dimension of Brownian motion W_t
+#     q = 5  # Level of iterated integrals for simulation
+#     q_iterated = 5 # Level of iterated integrals for iisignature computation
+#     t0 = 0.0
+#     t1 = 0.5
+#     dt = 0.01
+#
+#     M, level_sizes = compute_total_variables(m, q)  # Total number of variables including higher-order terms
+#
+#     # Initial condition X0, shape (M,)
+#     X0 = jnp.zeros(M)
+#     X0 = X0.at[0].set(1.0)  # Zero-order term initialized to 1
+#     X0 = X0.at[1].set(0.0)  # Time variable starts at t = 0
+#
+#
+#
+#     # Initialize the drift coefficient matrix a (M x M)
+#     a = jnp.zeros((M, M))
+#
+#     # Initialize the diffusion coefficient tensor b (M x n x M)
+#     b = jnp.zeros((M, n, M))
+#
+#     # Generate variable indices
+#     variable_indices_full = generate_all_variable_indices(m, q)
+#
+#     # Define your coefficients
+#     coefficients = {
+#         'drift': {
+#             'Y_1': {'Y_1': -1, 'Y_1_1': 0.1, 'Y_2': 0.1},
+#             'Y_2': {'Y_0': 1, 'Y_2': -1, 'Y_1': 0.1, 'Y_2_1': 0.1},
+#         },
+#         'diffusion': {
+#             'Y_1': {'Y_0': {0: 5}, 'Y_1': {0: 0.7}, 'Y_1_1': {0: 0.5}},
+#             'Y_2': {'Y_0': {0: 0.5}, 'Y_2_2': {0: 0.5}},
+#         }
+#     }
+#
+#     # Set the coefficients in 'a' and 'b'
+#     a, b = set_coefficients_from_dict(a, b, variable_indices_full, coefficients, n)
+#
+#     # Create the drift and diffusion functions
+#     drift = drift_function_with_time(m, q, a)
+#     diffusion = diffusion_function_with_time(m, n, q, b)
+#
+#     # Generate multiple trajectories
+#     base_key = jax.random.PRNGKey(0)  # Base key
+#     keys = jax.random.split(base_key, N)
+#
+#     solutions = []
+#     for i in range(N):
+#         sol, solver = solve_sde(
+#             drift_function=drift,
+#             diffusion_function=diffusion,
+#             initial_condition=X0,
+#             t0=t0,
+#             t1=t1,
+#             dt=dt,
+#             key=keys[i]
+#         )
+#         solutions.append(sol)
+#
+#     ys_array = jnp.stack([sol.ys for sol in solutions], axis=0)  # Shape: (N, T, M)
+#     ys_array = np.array(ys_array)
+#     # Extract primary variables
+#     primary_data = ys_array[:, :, 2:m + 2]  # Shape: (N, T, m)
+#     primary_data_with_time = ys_array[:, :, 1:m + 2]  # Shape: (N, T, m)
+#     print('sanity', primary_data.shape)
+#     # Estimate the drift matrix
+#     A_hat = estimate_A(primary_data, dt, pinv=True)
+#     print("Estimated Drift Matrix A:")
+#     print(A_hat)
+#     H_hat = estimate_GGT(primary_data, t1, A_hat)
+#     print("Estimated Diffusion Matrix H:")
+#     print(H_hat)
+#
+#
+#
+#     t_2 = time.time()
+#     print('Total computation time:', t_2 - t_1)
+#
+#     # Prepare the signature computation
+#     sig_length = iisignature.siglength(m + 1, q_iterated)
+#     # Initialize an array to hold the signatures
+#     signatures = np.zeros((N, sig_length))
+#
+#     for n_ in range(N):
+#         path = primary_data_with_time[n_, :, :]  # Shape: (T, m+1)
+#         sig = iisignature.sig(path, q_iterated)
+#         signatures[n_, :] = sig
+#
+#     print(signatures.shape)
+#
+#     # Compute the empirical expected signature
+#     expected_signature = np.mean(signatures, axis=0)
+#
+#     # Generate multi-indices for the signature terms
+#     variable_names = ['t'] + [f'Y_{i}' for i in range(1, m + 1)]
+#     # For m=2, variable_names = ['t', 'Y_1', 'Y_2']
+#
+#     multi_indices = generate_signature_multi_indices(m+1, q_iterated)
+#     # multi_index_strings = ['_'.join(variable_names[i] for i in idx_tuple) for idx_tuple in multi_indices]
+#
+#     # Create mapping from multi_index strings to variable indices
+#     multi_index_to_variable_index = {}
+#     multi_index_strings = []
+#
+#     # Generate variable indices without 0 order term
+#     variable_indices = generate_variable_indices(m, q_iterated)
+#
+#     for idx_tuple in multi_indices:
+#         variable_name = '_'.join(variable_names[idx_j] for idx_j in idx_tuple)
+#         variable_index = variable_indices.get(variable_name)
+#         multi_index_strings.append(variable_name)
+#         multi_index_to_variable_index[variable_name] = variable_index
+#
+#     # Initialize list to hold expected values from SDE
+#     expected_value_sde = []
+#
+#     for multi_idx_str in multi_index_strings:
+#         variable_index = multi_index_to_variable_index.get(multi_idx_str)
+#         if variable_index is not None and variable_index < ys_array.shape[2]:
+#             # Extract variable values at variable_index from ys_array
+#             variable_values = ys_array[:, -1, 1+variable_index]  # At final time point
+#             expected_value = np.mean(variable_values)
+#         else:
+#             expected_value = np.nan  # Variable not present in SDE solution
+#         expected_value_sde.append(expected_value)
+#
+#     # Create a DataFrame
+#     df = pd.DataFrame({
+#         'multi_index': multi_index_strings,
+#         'expected_value': expected_signature,
+#         'expected_value_sde': expected_value_sde
+#     })
+#
+#     # Add a 'level' column
+#     df['level'] = [len(idx_tuple) for idx_tuple in multi_indices]
+#
+#     # Compute the difference
+#     df['difference'] = df['expected_value'] - df['expected_value_sde']
+#
+#
+#     print(df.head(sig_length))
+#
+#     # Save the DataFrame to CSV
+#     base_filename = f'{experiment_name}_expected_signatures_N-{N}_seed-{int(base_key[0])}'
+#     csv_filename = base_filename + '.csv'
+#     df.to_csv(csv_filename, index=False)
+#     # Prepare metadata
+#     metadata = {
+#         'N': N,
+#         'm': m,
+#         'n': n,
+#         'q': q,
+#         'q_iterated': q_iterated,
+#         't1': t1,
+#         'dt': dt,
+#         'coefficients': coefficients,
+#         'base_key': int(base_key[0]),
+#         'solver': solver.__class__.__name__,  # Include solver name
+#     }
+#
+#
+#     # Save metadata to JSON file
+#     with open(f'metadata_{base_filename}.json', 'w') as f:
+#         json.dump(metadata, f, indent=4)
+#
+#     solution = solutions[0]
+#     plot_primary_variables(solution, m)
+#     # Plot all variables
+#     plot_all_variables(solution)
+#     plot_differences(df)
