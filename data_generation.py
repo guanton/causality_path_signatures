@@ -1,8 +1,7 @@
-import diffrax
+import os
 import jax
 import jax.numpy as jnp
 from diffrax import diffeqsolve, ControlTerm, Heun, MultiTerm, ODETerm, SaveAt, VirtualBrownianTree
-from scipy.integrate import cumulative_trapezoid
 import time
 import iisignature
 from typing import Callable
@@ -11,6 +10,8 @@ import pandas as pd
 import json
 import itertools
 import argparse
+
+
 
 def generate_signature_multi_indices(d, q):
     """
@@ -366,7 +367,7 @@ def estimate_GGT(trajectories, T, est_A=None):
 
 
 def run_experiment(config: dict, experiment_name: str):
-    t_1 = time.time()
+    t_0 = time.time()
 
     N = config["N"]
     m = config["m"]
@@ -377,99 +378,129 @@ def run_experiment(config: dict, experiment_name: str):
     dt = config["dt"]
     coefficients = config["coefficients"]
     base_key_val = config["base_key"]
+    n_seeds = config.get("n_seeds", 1)
+    plotting_on = config.get("plotting_on", 0)
+    # Initialize a single DataFrame to collect results from all seeds
+    all_results = []
+    output_dir = experiment_name
 
-    t0 = 0.0
+    for seed in range(n_seeds):
+        t_1 = time.time()
+        current_key = base_key_val + seed
+        t0 = 0.0
 
-    M, level_sizes = compute_total_variables(m, q)
-    X0 = jnp.zeros(M)
-    X0 = X0.at[0].set(1.0)
-    X0 = X0.at[1].set(0.0)
+        M, level_sizes = compute_total_variables(m, q)
+        X0 = jnp.zeros(M)
+        X0 = X0.at[0].set(1.0)
+        X0 = X0.at[1].set(0.0)
 
-    a = jnp.zeros((M, M))
-    b = jnp.zeros((M, n, M))
+        a = jnp.zeros((M, M))
+        b = jnp.zeros((M, n, M))
 
-    variable_indices_full = generate_all_variable_indices(m, q)
-    a, b = set_coefficients_from_dict(a, b, variable_indices_full, coefficients, n)
+        variable_indices_full = generate_all_variable_indices(m, q)
+        a, b = set_coefficients_from_dict(a, b, variable_indices_full, coefficients, n)
 
-    drift = drift_function_with_time(m, q, a)
-    diffusion = diffusion_function_with_time(m, n, q, b)
+        drift = drift_function_with_time(m, q, a)
+        diffusion = diffusion_function_with_time(m, n, q, b)
 
-    base_key = jax.random.PRNGKey(base_key_val)
-    keys = jax.random.split(base_key, N)
+        base_key = jax.random.PRNGKey(current_key)
+        keys = jax.random.split(base_key, N)
 
-    solutions = []
-    for i in range(N):
-        sol, solver_used = solve_sde(
-            drift_function=drift,
-            diffusion_function=diffusion,
-            initial_condition=X0,
-            t0=t0,
-            t1=t1,
-            dt=dt,
-            key=keys[i]
-        )
-        solutions.append(sol)
+        solutions = []
+        for i in range(N):
+            sol, solver_used = solve_sde(
+                drift_function=drift,
+                diffusion_function=diffusion,
+                initial_condition=X0,
+                t0=t0,
+                t1=t1,
+                dt=dt,
+                key=keys[i]
+            )
+            solutions.append(sol)
 
-    ys_array = jnp.stack([sol.ys for sol in solutions], axis=0)
-    ys_array = np.array(ys_array)
+        ys_array = jnp.stack([sol.ys for sol in solutions], axis=0)
+        ys_array = np.array(ys_array)
 
-    primary_data = ys_array[:, :, 2:m + 2]
-    primary_data_with_time = ys_array[:, :, 1:m + 2]
 
-    A_hat = estimate_A(primary_data, dt, pinv=True)
-    H_hat = estimate_GGT(primary_data, t1, A_hat)
-    print('estimated A:', A_hat)
-    print('estimated H:', H_hat)
+        primary_data_with_time = ys_array[:, :, 1:m + 2]
 
-    t_2 = time.time()
-    print('Total computation time:', t_2 - t_1)
+        # primary_data = ys_array[:, :, 2:m + 2] # used for MLE drift diffusion estimation
+        # A_hat = estimate_A(primary_data, dt, pinv=True)
+        # H_hat = estimate_GGT(primary_data, t1, A_hat)
+        # print('estimated A:', A_hat)
+        # print('estimated H:', H_hat)
 
-    sig_length = iisignature.siglength(m + 1, q_iterated)
-    signatures = np.zeros((N, sig_length))
-    for n_ in range(N):
-        path = primary_data_with_time[n_, :, :]
-        sig = iisignature.sig(path, q_iterated)
-        signatures[n_, :] = sig
 
-    expected_signature = np.mean(signatures, axis=0)
+        sig_length = iisignature.siglength(m + 1, q_iterated)
+        signatures = np.zeros((N, sig_length))
+        for n_ in range(N):
+            path = primary_data_with_time[n_, :, :]
+            sig = iisignature.sig(path, q_iterated)
+            signatures[n_, :] = sig
 
-    variable_names = ['t'] + [f'Y_{i}' for i in range(1, m + 1)]
-    multi_indices = generate_signature_multi_indices(m+1, q_iterated)
-    variable_indices = generate_variable_indices(m, q_iterated)
+        expected_signature = np.mean(signatures, axis=0)
+        expected_signature_with_empty = np.concatenate(([1.0], expected_signature))
 
-    multi_index_strings = []
-    multi_index_to_variable_index = {}
-    for idx_tuple in multi_indices:
-        variable_name = '_'.join(variable_names[idx_j] for idx_j in idx_tuple)
-        variable_index = variable_indices.get(variable_name)
-        multi_index_strings.append(variable_name)
-        multi_index_to_variable_index[variable_name] = variable_index
+        variable_names = ['t'] + [f'Y_{i}' for i in range(1, m + 1)]
+        multi_indices = generate_signature_multi_indices(m+1, q_iterated)
+        variable_indices = generate_variable_indices(m, q_iterated)
 
-    expected_value_sde = []
-    for multi_idx_str in multi_index_strings:
-        variable_index = multi_index_to_variable_index.get(multi_idx_str)
-        if variable_index is not None and variable_index < ys_array.shape[2]:
-            variable_values = ys_array[:, -1, 1 + variable_index]
-            expected_value = np.mean(variable_values)
-        else:
-            expected_value = np.nan
-        expected_value_sde.append(expected_value)
+        multi_index_strings = ['{}']
+        multi_index_to_variable_index = {}
+        for idx_tuple in multi_indices:
+            variable_name = '_'.join(variable_names[idx_j] for idx_j in idx_tuple)
+            variable_index = variable_indices.get(variable_name)
+            multi_index_strings.append(variable_name)
+            multi_index_to_variable_index[variable_name] = variable_index
 
-    df = pd.DataFrame({
-        'multi_index': multi_index_strings,
-        'expected_value': expected_signature,
-        'expected_value_sde': expected_value_sde
-    })
-    df['level'] = [len(idx_tuple) for idx_tuple in multi_indices]
-    df['difference'] = df['expected_value'] - df['expected_value_sde']
+        expected_value_sde = []
+        for multi_idx_str in multi_index_strings:
+            variable_index = multi_index_to_variable_index.get(multi_idx_str)
+            if variable_index is not None and variable_index < ys_array.shape[2]:
+                variable_values = ys_array[:, -1, 1 + variable_index]
+                expected_value = np.mean(variable_values)
+            elif multi_idx_str == '{}':
+                expected_value = 1.0
+            else:
+                expected_value = np.nan
+            expected_value_sde.append(expected_value)
 
-    # Use the exact filenames requested by the user
-    # For example:
-    # For the first experiment: simple_OU_1_expected_signatures_N-1000_seed-0.csv
-    # We'll assume `experiment_name` is given as e.g. "simple_OU_1"
-    csv_filename = f"{experiment_name}_expected_signatures_N-{N}_seed-{base_key_val}.csv"
-    df.to_csv(csv_filename, index=False)
 
+        if len(expected_value_sde) != len(multi_index_strings):
+            print(len(expected_value_sde))
+            print(len(multi_index_strings))
+            raise ValueError("Length mismatch: `expected_value_sde` and `multi_index_strings` must be the same length.")
+
+        df = pd.DataFrame({
+            'multi_index': multi_index_strings,
+            'expected_value': expected_signature_with_empty,
+            'expected_value_sde': expected_value_sde
+        })
+        df['level'] = [0] + [len(idx_tuple) for idx_tuple in multi_indices]
+        df['difference'] = df['expected_value'] - df['expected_value_sde']
+
+        all_results.append(df)
+        t_2 = time.time()
+        print(
+            f'Computation time for seed {seed + 1} of {n_seeds} : {t_2 - t_1}. Cumulative computation time: {t_2 - t_0}')
+        #
+        if plotting_on != 0:
+            plot_marginals(solutions, m, experiment_name = experiment_name, output_dir = output_dir)
+            solution = solutions[0]
+            plot_primary_variables(solution, m, experiment_name = experiment_name, output_dir = output_dir)
+            plot_all_variables(solution, experiment_name = experiment_name, output_dir = output_dir)
+            plt.close()
+            plot_differences(df)
+
+    final_df = pd.concat(all_results, ignore_index=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save the CSV file
+    csv_filename = os.path.join(output_dir, f"{experiment_name}_expected_signatures_N-{N}_seed-{base_key_val}_n_seeds-{n_seeds}.csv")
+    final_df.to_csv(csv_filename, index=False)
+
+    # Prepare and save the JSON metadata
     metadata = {
         'N': N,
         'm': m,
@@ -480,18 +511,13 @@ def run_experiment(config: dict, experiment_name: str):
         'dt': dt,
         'coefficients': coefficients,
         'base_key': int(base_key[0]),
+        'n_seeds': n_seeds,
         'solver': solver_used.__class__.__name__
     }
 
-    json_filename = f"metadata_{experiment_name}_expected_signatures_N-{N}_seed-{base_key_val}.json"
+    json_filename = os.path.join(output_dir, f"{experiment_name}_metadata_N-{N}_seed-{base_key_val}.json")
     with open(json_filename, 'w') as f:
         json.dump(metadata, f, indent=4)
-
-    # Plotting
-    solution = solutions[0]
-    # plot_primary_variables(solution, m)
-    # plot_all_variables(solution)
-    # plot_differences(df)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
